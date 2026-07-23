@@ -1854,35 +1854,44 @@ export default function Home() {
     const iOwe = trip.settlements.filter((s) => s.fromId === me.memberId && s.status !== "completed");
     const owesMe = trip.settlements.filter((s) => s.toId === me.memberId && s.status !== "completed");
 
-    // Per-expense lines between me and one other member.
-    // amt > 0 = adds to what I owe them; amt < 0 = adds to what they owe me.
-    const pairLines = (otherId: string) => {
+    // Per-expense lines between two members, from a's perspective.
+    // amt > 0 = adds to what a owes b; amt < 0 = adds to what b owes a.
+    const pairBetween = (aId: string, bId: string) => {
       const lines: { label: string; amt: number }[] = [];
+      const you = aId === me.memberId;
       for (const e of trip.expenses) {
         if (e.status !== "approved") continue;
-        const myShare = e.splits.find((s) => s.memberId === me.memberId)?.amount || 0;
-        const theirShare = e.splits.find((s) => s.memberId === otherId)?.amount || 0;
-        if (e.paidBy === otherId && myShare > 0) lines.push({ label: e.description, amt: myShare });
-        if (e.paidBy === me.memberId && theirShare > 0) lines.push({ label: e.description, amt: -theirShare });
+        const aShare = e.splits.find((s) => s.memberId === aId)?.amount || 0;
+        const bShare = e.splits.find((s) => s.memberId === bId)?.amount || 0;
+        if (e.paidBy === bId && aShare > 0) lines.push({ label: e.description, amt: aShare });
+        if (e.paidBy === aId && bShare > 0) lines.push({ label: e.description, amt: -bShare });
       }
       for (const h of trip.handovers) {
-        if (h.fromId === me.memberId && h.toId === otherId) lines.push({ label: `Handover you gave${h.note ? ` (${h.note})` : ""}`, amt: -h.amount });
-        if (h.fromId === otherId && h.toId === me.memberId) lines.push({ label: `Handover you received${h.note ? ` (${h.note})` : ""}`, amt: h.amount });
+        if (h.fromId === aId && h.toId === bId) lines.push({ label: `Handover ${you ? "you" : memberName(trip, aId)} gave${h.note ? ` (${h.note})` : ""}`, amt: -h.amount });
+        if (h.fromId === bId && h.toId === aId) lines.push({ label: `Handover ${you ? "you" : memberName(trip, aId)} received${h.note ? ` (${h.note})` : ""}`, amt: h.amount });
+      }
+      for (const st of trip.settlements) {
+        if (st.status === "pending") continue; // only money that actually moved
+        if (st.fromId === aId && st.toId === bId) lines.push({ label: you ? "Already paid by you" : `Already paid by ${memberName(trip, aId)}`, amt: -st.amount });
+        if (st.fromId === bId && st.toId === aId) lines.push({ label: `Already paid by ${memberName(trip, bId)}`, amt: st.amount });
       }
       return lines;
     };
+    const pairNet = (aId: string, bId: string) => round2(pairBetween(aId, bId).reduce((a, l) => a + l.amt, 0));
 
     // sign: +1 when the row is "I pay them", -1 when the row is "they pay me"
     const settleBreakdown = (otherId: string, total: number, sign: 1 | -1) => {
-      const lines = pairLines(otherId);
+      const lines = pairBetween(me.memberId, otherId);
       const sum = round2(lines.reduce((a, l) => a + sign * l.amt, 0));
       const adjusted = Math.abs(sum - total) > 0.01;
-      // When netting rerouted money, name the balances that got folded in: my direct
-      // balances with members who have no settlement row with me of their own.
+      // When netting rerouted money, explain it through the PAYER's other balances:
+      // on a pay row the payer is me; on a receive row the payer is the other person.
+      const payerId = sign === 1 ? me.memberId : otherId;
+      const payerName = sign === 1 ? "you" : memberName(trip, otherId);
       const rerouted = adjusted
         ? trip.members
             .filter((m) => m.memberId !== me.memberId && m.memberId !== otherId)
-            .map((m) => ({ name: m.name, net: round2(pairLines(m.memberId).reduce((a, l) => a + l.amt, 0)) }))
+            .map((m) => ({ name: m.name, net: pairNet(payerId, m.memberId) }))
             .filter((x) => Math.abs(x.net) > 0.01)
         : [];
       return (
@@ -1905,13 +1914,13 @@ export default function Home() {
             <div className="pt-1">
               <p className="text-[11px] font-medium text-muted-foreground">
                 <i className="fa-solid fa-shuffle mr-1 text-primary" />
-                Smart netting: direct total between you two is {formatINR(Math.max(sum, 0))}; this payment is {formatINR(total)} because these balances were folded in:
+                Direct total between you two is {formatINR(Math.max(sum, 0))}, but {sign === 1 ? "you pay" : `${payerName} pays`} {formatINR(total)} because {sign === 1 ? "your" : `${payerName}'s`} other balances are settled through this payment:
               </p>
               <div className="mt-1 space-y-1">
                 {rerouted.map((x) => (
                   <div key={x.name} className="flex items-center justify-between gap-2 pl-3">
                     <span className="truncate text-muted-foreground">
-                      {x.net > 0 ? `You owe ${x.name} (direct)` : `${x.name} owes you (direct)`}
+                      {x.net > 0 ? `${payerName === "you" ? "You owe" : `${payerName} owes`} ${x.name} (direct)` : `${x.name} owes ${payerName} (direct)`}
                     </span>
                     <span className={`shrink-0 font-medium ${x.net > 0 ? "" : "text-primary"}`}>{formatINR(Math.abs(x.net))}</span>
                   </div>
