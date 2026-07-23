@@ -1895,8 +1895,18 @@ export default function Home() {
           if (m.memberId === me.memberId || m.memberId === otherId) continue;
           const net = pairNet(payerId, m.memberId);
           if (Math.abs(net) > 0.01) {
+            // if that third person has fully settled, their balance already
+            // arrived/left through completed payments — say so instead of "owes"
+            const oDone = Math.abs(balances.find((b) => b.memberId === m.memberId)?.net || 0) < 0.01;
             rerouted.push({
-              label: net > 0 ? `${payerName === "you" ? "You owe" : `${payerName} owes`} ${m.name} (direct)` : `${m.name} owes ${payerName} (direct)`,
+              label:
+                net > 0
+                  ? oDone
+                    ? `${payerName === "you" ? "You owed" : `${payerName} owed`} ${m.name} — settled via group payments`
+                    : `${payerName === "you" ? "You owe" : `${payerName} owes`} ${m.name} (direct)`
+                  : oDone
+                  ? `${m.name} owed ${payerName} — collected via ${m.name}'s completed payment`
+                  : `${m.name} owes ${payerName} (direct)`,
               effect: net,
             });
           }
@@ -2060,6 +2070,15 @@ export default function Home() {
                   const myNet = balances.find((x) => x.memberId === me.memberId)?.net || 0;
                   const theirNet = balances.find((x) => x.memberId === m.memberId)?.net || 0;
                   const bothSettled = Math.abs(myNet) < 0.01 && Math.abs(theirNet) < 0.01;
+                  // part of the routed amount already arrived: third parties who owed
+                  // this person and have fully settled (their payment carried it here)
+                  const collectedVia = trip.members
+                    .filter((o) => o.memberId !== me.memberId && o.memberId !== m.memberId)
+                    .filter((o) => Math.abs(balances.find((b) => b.memberId === o.memberId)?.net || 0) < 0.01)
+                    .map((o) => ({ name: o.name, amt: round2(-pairNet(m.memberId, o.memberId)) }))
+                    .filter((x) => x.amt > 0.01);
+                  const collected = round2(collectedVia.reduce((a, x) => a + x.amt, 0));
+                  const stillViaOthers = round2(routed - collected);
                   return (
                     <details key={m.memberId} className="group rounded-xl bg-background/40">
                       <summary className="flex cursor-pointer list-none items-center gap-3 px-3 py-2.5 [&::-webkit-details-marker]:hidden">
@@ -2088,14 +2107,23 @@ export default function Home() {
                           </p>
                         ) : (
                           <>
-                            {avail > 0.01 && directFromThem > 0.01 && (
-                              <p className="pt-0.5 text-[11px] text-muted-foreground/80">
-                                {m.name} pays you {formatINR(directFromThem)} directly (see settlements)
-                                {Math.abs(routed) > 0.01 ? `; ${formatINR(Math.abs(routed))} reaches you inside other members' payments via smart netting.` : "."}
-                              </p>
+                            {avail > 0.01 && collected > 0.01 && (
+                              <div className="flex justify-between pt-0.5">
+                                <span className="text-muted-foreground">Already collected via {collectedVia.map((x) => x.name).join(", ")}'s completed payment{collectedVia.length > 1 ? "s" : ""}</span>
+                                <span className="font-medium text-primary">-{formatINR(collected)}</span>
+                              </div>
                             )}
-                            {avail > 0.01 && directFromThem <= 0.01 && Math.abs(routed) > 0.01 && (
-                              <p className="pt-0.5 text-[11px] text-muted-foreground/80">This reaches you inside other members' payments via smart netting.</p>
+                            {avail > 0.01 && collected > 0.01 && (
+                              <div className="flex justify-between font-semibold">
+                                <span>Still outstanding</span>
+                                <span>{formatINR(round2(avail - collected))}</span>
+                              </div>
+                            )}
+                            {avail > 0.01 && (
+                              <p className="pt-0.5 text-[11px] text-muted-foreground/80">
+                                {directFromThem > 0.01 ? `${m.name} pays you ${formatINR(directFromThem)} directly (see settlements)` : `Nothing due directly from ${m.name}`}
+                                {stillViaOthers > 0.01 ? `; ${formatINR(stillViaOthers)} reaches you inside other members' payments via smart netting.` : "."}
+                              </p>
                             )}
                             {avail < -0.01 && (
                               <p className="pt-0.5 text-[11px] text-muted-foreground/80">
