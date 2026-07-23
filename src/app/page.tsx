@@ -631,34 +631,33 @@ export default function Home() {
     }
   }, [toast]);
 
-  /** Load a trip for the join screen. Only a real 404 means "trip not found";
-      network failures and 5xx (mobile blips, serverless cold starts) are retried
-      with backoff for ~10s before showing a "connection problem" screen. */
-  const loadJoinTrip = useCallback(async (tid: string) => {
-    setJoinLoading(true);
-    setJoinError(null);
-    let t: Trip | null = null;
-    let error: "notfound" | "network" = "network";
+  /** Fetch a trip with backoff retries (~10s total) to ride out mobile blips and
+      serverless cold starts. Only a real 404 stops early — the server answered. */
+  const fetchTripWithRetry = useCallback(async (tid: string): Promise<{ trip: Trip | null; error: "notfound" | "network" | null }> => {
     const delays = [0, 700, 1500, 3000, 5000];
     for (const delay of delays) {
       if (delay) await new Promise((r) => setTimeout(r, delay));
       try {
         const data = await api<{ trip: Trip }>(`/api/trips/${tid}`);
-        t = data.trip;
-        break;
+        return { trip: data.trip, error: null };
       } catch (e: any) {
-        if (e?.status === 404) {
-          error = "notfound";
-          break; // the server answered: this trip really doesn't exist
-        }
+        if (e?.status === 404) return { trip: null, error: "notfound" };
         // network error / 5xx — retry
       }
     }
+    return { trip: null, error: "network" };
+  }, []);
+
+  /** Load a trip for the join screen. */
+  const loadJoinTrip = useCallback(async (tid: string) => {
+    setJoinLoading(true);
+    setJoinError(null);
+    const { trip: t, error } = await fetchTripWithRetry(tid);
     setJoinTrip(t);
-    setJoinError(t ? null : error);
+    setJoinError(error);
     if (t) setTrip(t);
     setJoinLoading(false);
-  }, []);
+  }, [fetchTripWithRetry]);
 
   const fetchPendingJoins = useCallback(async (tripId: string, password: string) => {
     try {
@@ -695,8 +694,9 @@ export default function Home() {
       } catch {}
       if (s) {
         setSession(s);
-        const t = await fetchTrip(s.tripId);
+        const { trip: t } = await fetchTripWithRetry(s.tripId);
         if (t) {
+          setTrip(t);
           setView("dashboard");
           if (s.role === "creator" && s.password) fetchPendingJoins(s.tripId, s.password);
         } else {
@@ -762,18 +762,24 @@ export default function Home() {
     });
   }
 
-  function joinAsMember(tid: string, memberId: string) {
+  async function joinAsMember(tid: string, memberId: string) {
     const s: Session = { tripId: tid, memberId, role: "member" };
     saveSession(s);
-    setJoinTrip(null);
-    if (window.location.hash) history.replaceState(null, "", window.location.pathname);
-    fetchTrip(tid).then((t) => {
-      if (t) {
-        setView("dashboard");
-        setMemberTab("myview");
-        toast(`Joined as ${t.members.find((m) => m.memberId === memberId)?.name}.`, "success");
-      }
-    });
+    // Keep joinTrip/member list mounted behind the spinner — clearing it made the
+    // join screen flash its error state while a slow (cold-start) fetch resolved.
+    setJoinLoading(true);
+    const { trip: t } = await fetchTripWithRetry(tid);
+    setJoinLoading(false);
+    if (t) {
+      setTrip(t);
+      if (window.location.hash) history.replaceState(null, "", window.location.pathname);
+      setJoinTrip(null);
+      setView("dashboard");
+      setMemberTab("myview");
+      toast(`Joined as ${t.members.find((m) => m.memberId === memberId)?.name}.`, "success");
+    } else {
+      toast("Couldn't reach the server. Check your internet and tap your name again.", "error");
+    }
   }
 
   async function submitJoinRequest(name: string, phone: string) {
@@ -1068,7 +1074,7 @@ export default function Home() {
             <div className="mb-5 flex items-center gap-3">
               <Logo size="sm" />
             </div>
-            {joinLoading ? (
+            {joinLoading || (!joinTrip && !joinError) ? (
               <div className="py-10 text-center text-muted-foreground">
                 <i className="fa-solid fa-spinner fa-spin text-xl text-primary" />
                 <p className="mt-2 text-sm">Loading trip…</p>
