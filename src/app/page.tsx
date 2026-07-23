@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, useCallback, type ReactNode } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef, type ReactNode } from "react";
 import { Btn, Modal, Field, Inp, Txt, Sel, Badge, Empty, Logo } from "@/components/spliitup/ui";
 import { OnboardingWizard, ONBOARDING_KEY } from "@/components/spliitup/onboarding";
 import {
@@ -2040,22 +2040,39 @@ function IconBtn({ children, title, tone = "muted", onClick }: { children: React
 /* =====================================================================
    Add Member Modal
    ===================================================================== */
-function AddMemberModal({ onClose, onAdd }: { onClose: () => void; onAdd: (name: string, phone: string) => void }) {
+function AddMemberModal({ onClose, onAdd }: { onClose: () => void; onAdd: (name: string, phone: string) => Promise<void> }) {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
+  const [busy, setBusy] = useState(false);
+  // ref guard: state updates are async, so a fast double-click could pass a
+  // `busy` check twice before the re-render lands. The ref flips synchronously.
+  const busyRef = useRef(false);
+  async function submit() {
+    if (!name.trim() || !phone.trim() || busyRef.current) return;
+    busyRef.current = true;
+    try {
+      setBusy(true);
+      await onAdd(name.trim(), phone.trim());
+    } catch {
+      // error already toasted by mutate(); keep the modal open for retry
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+    }
+  }
   return (
     <Modal open onClose={onClose} title="Add Member" subtitle="Add a person directly to the trip." icon={<i className="fa-solid fa-user-plus" />}>
       <div className="space-y-4">
         <Field label="Name" required>
-          <Inp value={name} onChange={(e) => setName(e.target.value)} placeholder="Member name" autoFocus />
+          <Inp value={name} onChange={(e) => setName(e.target.value)} placeholder="Member name" autoFocus disabled={busy} />
         </Field>
         <Field label="Phone" required>
-          <Inp value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="10-digit phone" />
+          <Inp value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="10-digit phone" disabled={busy} />
         </Field>
         <div className="flex justify-end gap-2 pt-1">
-          <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
-          <Btn variant="primary" onClick={() => { if (name.trim() && phone.trim()) onAdd(name.trim(), phone.trim()); }}>
-            <i className="fa-solid fa-plus" /> Add
+          <Btn variant="ghost" onClick={onClose} disabled={busy}>Cancel</Btn>
+          <Btn variant="primary" onClick={submit} disabled={busy}>
+            {busy ? <><i className="fa-solid fa-spinner fa-spin" /> Adding…</> : <><i className="fa-solid fa-plus" /> Add</>}
           </Btn>
         </div>
       </div>
@@ -2066,22 +2083,37 @@ function AddMemberModal({ onClose, onAdd }: { onClose: () => void; onAdd: (name:
 /* =====================================================================
    Join Request Modal
    ===================================================================== */
-function JoinRequestModal({ onClose, onSubmit }: { onClose: () => void; onSubmit: (name: string, phone: string) => void }) {
+function JoinRequestModal({ onClose, onSubmit }: { onClose: () => void; onSubmit: (name: string, phone: string) => Promise<void> }) {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
+  const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
+  async function submit() {
+    if (!name.trim() || !phone.trim() || busyRef.current) return;
+    busyRef.current = true;
+    try {
+      setBusy(true);
+      await onSubmit(name.trim(), phone.trim());
+    } catch {
+      // error already toasted; keep the modal open for retry
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+    }
+  }
   return (
     <Modal open onClose={onClose} title="Request to Join" subtitle="The trip creator will review your request." icon={<i className="fa-solid fa-user-plus" />}>
       <div className="space-y-4">
         <Field label="Your Name" required>
-          <Inp value={name} onChange={(e) => setName(e.target.value)} placeholder="Enter your name" autoFocus />
+          <Inp value={name} onChange={(e) => setName(e.target.value)} placeholder="Enter your name" autoFocus disabled={busy} />
         </Field>
         <Field label="Your Phone" required>
-          <Inp value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="10-digit phone" />
+          <Inp value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="10-digit phone" disabled={busy} />
         </Field>
         <div className="flex justify-end gap-2 pt-1">
-          <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
-          <Btn variant="primary" onClick={() => { if (name.trim() && phone.trim()) onSubmit(name.trim(), phone.trim()); }}>
-            <i className="fa-solid fa-paper-plane" /> Submit Request
+          <Btn variant="ghost" onClick={onClose} disabled={busy}>Cancel</Btn>
+          <Btn variant="primary" onClick={submit} disabled={busy}>
+            {busy ? <><i className="fa-solid fa-spinner fa-spin" /> Submitting…</> : <><i className="fa-solid fa-paper-plane" /> Submit Request</>}
           </Btn>
         </div>
       </div>

@@ -7,7 +7,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ tripId:
   try {
     const { tripId } = await params;
     const body = await req.json();
-    const trip = await db.trip.findUnique({ where: { tripId } });
+    const trip = await db.trip.findUnique({ where: { tripId }, include: { members: true } });
     if (!trip) return NextResponse.json({ error: "Trip not found." }, { status: 404 });
     if (trip.password !== String(body.password || "")) {
       return NextResponse.json({ error: "Invalid creator password." }, { status: 403 });
@@ -19,6 +19,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ tripId:
     const phone = String(body.phone || "").trim();
     if (!name || !phone) {
       return NextResponse.json({ error: "Name and phone are required." }, { status: 400 });
+    }
+    // Guard against double-submits (e.g. clicking Add twice during a slow request).
+    if (trip.members.some((m) => m.name.toLowerCase() === name.toLowerCase() && m.phone === phone)) {
+      return NextResponse.json({ error: `${name} (${phone}) is already a member of this trip.` }, { status: 409 });
     }
     const memberId = genId("mem");
     const updated = await db.trip.update({
