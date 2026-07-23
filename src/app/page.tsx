@@ -14,13 +14,11 @@ import {
   allCategories,
   categoryMeta,
   computeBalances,
-  PREDEFINED_CATEGORIES,
   type Trip,
   type Expense,
   type Handover,
   type Member,
   type Settlement,
-  type BalanceRow,
   type CustomCategory,
 } from "@/lib/spliitup-client";
 
@@ -1868,8 +1866,8 @@ export default function Home() {
         if (e.paidBy === me.memberId && theirShare > 0) lines.push({ label: e.description, amt: -theirShare });
       }
       for (const h of trip.handovers) {
-        if (h.fromId === me.memberId && h.toId === otherId) lines.push({ label: `Handover${h.note ? ` (${h.note})` : ""}`, amt: -h.amount });
-        if (h.fromId === otherId && h.toId === me.memberId) lines.push({ label: `Handover${h.note ? ` (${h.note})` : ""}`, amt: h.amount });
+        if (h.fromId === me.memberId && h.toId === otherId) lines.push({ label: `Handover you gave${h.note ? ` (${h.note})` : ""}`, amt: -h.amount });
+        if (h.fromId === otherId && h.toId === me.memberId) lines.push({ label: `Handover you received${h.note ? ` (${h.note})` : ""}`, amt: h.amount });
       }
       return lines;
     };
@@ -1884,7 +1882,6 @@ export default function Home() {
       const rerouted = adjusted
         ? trip.members
             .filter((m) => m.memberId !== me.memberId && m.memberId !== otherId)
-            .filter((m) => !trip.settlements.some((st) => st.status !== "completed" && ((st.fromId === me.memberId && st.toId === m.memberId) || (st.fromId === m.memberId && st.toId === me.memberId))))
             .map((m) => ({ name: m.name, net: round2(pairLines(m.memberId).reduce((a, l) => a + l.amt, 0)) }))
             .filter((x) => Math.abs(x.net) > 0.01)
         : [];
@@ -1920,7 +1917,7 @@ export default function Home() {
                   </div>
                 ))}
                 {rerouted.length === 0 && (
-                  <p className="pl-3 text-muted-foreground">balances routed between other members of the group</p>
+                  <p className="pl-3 text-muted-foreground">adjusted as part of group-wide netting</p>
                 )}
               </div>
               <p className="mt-1 text-[11px] text-muted-foreground/80">Everyone still ends up with the right amount — just in fewer transfers.</p>
@@ -2007,6 +2004,51 @@ export default function Home() {
             )}
           </section>
         </div>
+
+        {/* Handover balances — how much of each handover is still "available" after
+            counting expense shares between the two people */}
+        {(handGiven > 0 || handReceived > 0) && (
+          <section className="rounded-2xl border border-border bg-card p-5">
+            <h3 className="mb-1 flex items-center gap-2 font-heading font-semibold"><i className="fa-solid fa-hand-holding-dollar text-warning" /> Handover Balances</h3>
+            <p className="mb-3 text-xs text-muted-foreground">What's left of the cash you handed over (or received), after your expense shares with that person.</p>
+            <div className="space-y-2">
+              {trip.members
+                .filter((m) => m.memberId !== me.memberId && trip.handovers.some((h) => (h.fromId === me.memberId && h.toId === m.memberId) || (h.fromId === m.memberId && h.toId === me.memberId)))
+                .map((m) => {
+                  const given = trip.handovers.filter((h) => h.fromId === me.memberId && h.toId === m.memberId).reduce((a, h) => a + h.amount, 0);
+                  const received = trip.handovers.filter((h) => h.fromId === m.memberId && h.toId === me.memberId).reduce((a, h) => a + h.amount, 0);
+                  const myShareOfTheirs = trip.expenses.filter((e) => e.status === "approved" && e.paidBy === m.memberId).reduce((a, e) => a + (e.splits.find((sp) => sp.memberId === me.memberId)?.amount || 0), 0);
+                  const theirShareOfMine = trip.expenses.filter((e) => e.status === "approved" && e.paidBy === me.memberId).reduce((a, e) => a + (e.splits.find((sp) => sp.memberId === m.memberId)?.amount || 0), 0);
+                  const avail = round2(given - received - myShareOfTheirs + theirShareOfMine);
+                  return (
+                    <details key={m.memberId} className="group rounded-xl bg-background/40">
+                      <summary className="flex cursor-pointer list-none items-center gap-3 px-3 py-2.5 [&::-webkit-details-marker]:hidden">
+                        <Avatar name={m.name} size={32} />
+                        <span className="min-w-0 flex-1 truncate text-sm font-medium">{m.name}</span>
+                        <span className={`text-sm font-semibold ${avail > 0.01 ? "text-primary" : avail < -0.01 ? "text-danger" : "text-muted-foreground"}`}>
+                          {avail > 0.01 ? `${formatINR(avail)} available` : avail < -0.01 ? `you owe ${formatINR(-avail)}` : "settled"}
+                        </span>
+                        <i className="fa-solid fa-chevron-down text-xs text-muted-foreground transition-transform group-open:rotate-180" />
+                      </summary>
+                      <div className="space-y-1 border-t border-border px-3 py-2.5 text-xs">
+                        {given > 0 && <div className="flex justify-between"><span className="text-muted-foreground">You handed over to {m.name}</span><span className="font-medium text-primary">+{formatINR(given)}</span></div>}
+                        {received > 0 && <div className="flex justify-between"><span className="text-muted-foreground">{m.name} handed over to you</span><span className="font-medium text-danger">-{formatINR(received)}</span></div>}
+                        {myShareOfTheirs > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Your share of {m.name}'s expenses</span><span className="font-medium text-danger">-{formatINR(myShareOfTheirs)}</span></div>}
+                        {theirShareOfMine > 0 && <div className="flex justify-between"><span className="text-muted-foreground">{m.name}'s share of your expenses</span><span className="font-medium text-primary">+{formatINR(theirShareOfMine)}</span></div>}
+                        <div className="flex justify-between border-t border-border pt-1.5 font-semibold">
+                          <span>Available balance</span>
+                          <span className={avail > 0.01 ? "text-primary" : avail < -0.01 ? "text-danger" : ""}>{formatINR(avail)}</span>
+                        </div>
+                        <p className="pt-0.5 text-[11px] text-muted-foreground/80">
+                          {avail > 0.01 ? `${m.name} is effectively holding ${formatINR(avail)} of yours — it's counted in your net balance and settlements.` : avail < -0.01 ? `You effectively owe ${m.name} ${formatINR(-avail)} — counted in your net balance and settlements.` : "You two are square."}
+                        </p>
+                      </div>
+                    </details>
+                  );
+                })}
+            </div>
+          </section>
+        )}
 
         {/* Bug 4: per-expense breakdown — what each expense cost me and who owes what */}
         <section className="rounded-2xl border border-border bg-card p-5">
