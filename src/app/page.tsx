@@ -807,6 +807,10 @@ export default function Home() {
     await mutate(`/api/trips/${trip!.tripId}/members`, "POST", { password: session.password, name, phone }, "Member added.");
     setModal(null);
   }
+  async function removeMember(m: Member) {
+    if (!session?.password) return;
+    setModal({ type: "confirm", title: "Remove member?", message: `${m.name} (${m.phone}) will be removed from the trip. Members involved in expenses, handovers, or settlements can't be removed.`, confirmLabel: "Remove", danger: true, onConfirm: async () => { setModal(null); await mutate(`/api/trips/${trip!.tripId}/members/${m.memberId}`, "DELETE", { password: session.password }, `${m.name} removed.`); } });
+  }
   async function approveJoin(p: PendingJoinRow) {
     if (!session?.password) return;
     await mutate(`/api/trips/${trip!.tripId}/pending/${p.id}/approve`, "POST", { password: session.password }, `${p.name} approved.`);
@@ -1486,6 +1490,9 @@ export default function Home() {
                 <p className="truncate text-xs text-muted-foreground"><i className="fa-solid fa-phone mr-1" />{m.phone}</p>
                 <p className="mt-0.5 text-[11px] text-muted-foreground">Joined {timeAgo(m.joinedAt)}</p>
               </div>
+              {session?.role === "creator" && i !== 0 && !trip.isClosed && (
+                <IconBtn title="Remove member" tone="danger" onClick={() => removeMember(m)}><i className="fa-solid fa-user-minus" /></IconBtn>
+              )}
             </div>
           ))}
         </div>
