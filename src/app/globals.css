@@ -1,0 +1,164 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-danger: var(--danger);
+  --color-danger-foreground: var(--danger-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --font-sans: var(--font-body), ui-sans-serif, system-ui, sans-serif;
+  --font-heading: var(--font-heading), ui-sans-serif, system-ui, sans-serif;
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+/* SpliitUp dark theme — always dark */
+:root {
+  --radius: 0.875rem;
+  --background: #060b14;
+  --foreground: #e6edf7;
+  --card: #111d32;
+  --card-foreground: #e6edf7;
+  --popover: #0d1729;
+  --popover-foreground: #e6edf7;
+  --primary: #10b981; /* emerald */
+  --primary-foreground: #04140d;
+  --secondary: #1a2c4d;
+  --secondary-foreground: #e6edf7;
+  --muted: #16243f;
+  --muted-foreground: #8da3c0;
+  --accent: #1a2c4d;
+  --accent-foreground: #e6edf7;
+  --destructive: #ef4444; /* red */
+  --warning: #f59e0b; /* amber */
+  --warning-foreground: #1a1205;
+  --danger: #ef4444;
+  --danger-foreground: #ffffff;
+  --border: #1e3255;
+  --input: #1e3255;
+  --ring: #10b981;
+  --font-body: "DM Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-heading: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+}
+
+.dark {
+  --background: #060b14;
+  --foreground: #e6edf7;
+  --card: #111d32;
+  --card-foreground: #e6edf7;
+  --popover: #0d1729;
+  --popover-foreground: #e6edf7;
+  --primary: #10b981;
+  --primary-foreground: #04140d;
+  --secondary: #1a2c4d;
+  --secondary-foreground: #e6edf7;
+  --muted: #16243f;
+  --muted-foreground: #8da3c0;
+  --accent: #1a2c4d;
+  --accent-foreground: #e6edf7;
+  --destructive: #ef4444;
+  --warning: #f59e0b;
+  --warning-foreground: #1a1205;
+  --danger: #ef4444;
+  --danger-foreground: #ffffff;
+  --border: #1e3255;
+  --input: #1e3255;
+  --ring: #10b981;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    color-scheme: dark;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-body), ui-sans-serif, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  h1, h2, h3, h4, h5, h6, .font-heading {
+    font-family: var(--font-heading), ui-sans-serif, system-ui, sans-serif;
+    letter-spacing: -0.02em;
+  }
+}
+
+/* Custom scrollbar */
+.spl-scroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.spl-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.spl-scroll::-webkit-scrollbar-thumb {
+  background: #1e3255;
+  border-radius: 9999px;
+}
+.spl-scroll::-webkit-scrollbar-thumb:hover {
+  background: #2a4773;
+}
+
+/* Utility for frosted glass panels */
+.glass {
+  background: rgba(17, 29, 50, 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+/* Subtle entrance animation */
+@keyframes spl-fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.spl-fade-in {
+  animation: spl-fade-in 0.25s ease-out both;
+}
+@keyframes spl-scale-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+.spl-scale-in {
+  animation: spl-scale-in 0.18s ease-out both;
+}
+@keyframes spl-toast-in {
+  from { opacity: 0; transform: translateX(24px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+.spl-toast-in {
+  animation: spl-toast-in 0.22s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Hide number input spinners */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+}

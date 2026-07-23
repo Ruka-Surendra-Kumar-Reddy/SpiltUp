@@ -1,0 +1,96 @@
+// SpliitUp — Trip Budget Splitting
+// Prisma schema (SQLite). Collections mirror the requested Mongoose models.
+// Embedded arrays (members/expenses/handovers/settlements) are modeled as
+// related tables for queryability; API responses shape them as embedded arrays.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Trip {
+  id               String   @id @default(cuid())
+  tripId           String   @unique // short code used in URLs
+  name             String
+  password         String
+  approvalMode     String   @default("auto") // "auto" | "manual"
+  isClosed         Boolean  @default(false)
+  customCategories Json     @default("[]") // [{id,name,icon,color}]
+  createdAt        DateTime @default(now())
+
+  members      Member[]
+  expenses     Expense[]
+  handovers    Handover[]
+  settlements  Settlement[]
+}
+
+model Member {
+  id        String   @id @default(cuid())
+  memberId  String
+  name      String
+  phone     String
+  joinedAt  DateTime @default(now())
+  trip      Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  tripId    String
+
+  @@unique([tripId, memberId])
+}
+
+model Expense {
+  id          String   @id @default(cuid())
+  expenseId   String
+  description String
+  amount      Float
+  category    String
+  paidBy      String // memberId
+  splits      Json     @default("[]") // [{memberId, amount}]
+  reason      String   @default("")
+  splitType   String   @default("equal") // "equal" | "custom"
+  explanation String   @default("")
+  status      String   @default("approved") // "approved" | "pending"
+  createdBy   String // memberId
+  createdAt   DateTime @default(now())
+  trip        Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  tripId      String
+
+  @@unique([tripId, expenseId])
+}
+
+model Handover {
+  id         String   @id @default(cuid())
+  handoverId String
+  fromId     String // memberId
+  toId       String // memberId
+  amount     Float
+  note       String   @default("")
+  createdBy  String // memberId
+  createdAt  DateTime @default(now())
+  trip       Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  tripId     String
+
+  @@unique([tripId, handoverId])
+}
+
+model Settlement {
+  id        String   @id @default(cuid())
+  fromId    String // memberId (payer)
+  toId      String // memberId (receiver)
+  amount    Float
+  status    String   @default("pending") // "pending" | "paid" | "completed"
+  createdAt DateTime @default(now())
+  trip      Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  tripId    String
+}
+
+// Separate model (not embedded in Trip), references Trip.tripId string.
+model PendingJoin {
+  id        String   @id @default(cuid())
+  tripId    String // references Trip.tripId
+  name      String
+  phone     String
+  createdAt DateTime @default(now())
+}
