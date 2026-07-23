@@ -2079,13 +2079,15 @@ export default function Home() {
                     .filter((x) => x.amt > 0.01);
                   const collected = round2(collectedVia.reduce((a, x) => a + x.amt, 0));
                   const stillViaOthers = round2(routed - collected);
+                  // headline number: what's actually still to come, walks down to 0
+                  const outstanding = avail > 0.01 ? round2(avail - collected) : avail;
                   return (
                     <details key={m.memberId} className="group rounded-xl bg-background/40">
                       <summary className="flex cursor-pointer list-none items-center gap-3 px-3 py-2.5 [&::-webkit-details-marker]:hidden">
                         <Avatar name={m.name} size={32} />
                         <span className="min-w-0 flex-1 truncate text-sm font-medium">{m.name}</span>
-                        <span className={`text-sm font-semibold ${bothSettled || Math.abs(avail) < 0.01 ? "text-muted-foreground" : avail > 0.01 ? "text-primary" : "text-danger"}`}>
-                          {bothSettled || Math.abs(avail) < 0.01 ? "settled" : avail > 0.01 ? `${formatINR(avail)} available` : `you owe ${formatINR(-avail)}`}
+                        <span className={`text-sm font-semibold ${bothSettled || Math.abs(outstanding) < 0.01 ? "text-muted-foreground" : outstanding > 0.01 ? "text-primary" : "text-danger"}`}>
+                          {bothSettled || Math.abs(outstanding) < 0.01 ? "settled" : outstanding > 0.01 ? `${formatINR(outstanding)} to collect` : `you owe ${formatINR(-outstanding)}`}
                         </span>
                         <i className="fa-solid fa-chevron-down text-xs text-muted-foreground transition-transform group-open:rotate-180" />
                       </summary>
@@ -2096,9 +2098,9 @@ export default function Home() {
                         {theirShareOfMine > 0 && <div className="flex justify-between"><span className="text-muted-foreground">{m.name}'s share of your expenses</span><span className="font-medium text-primary">+{formatINR(theirShareOfMine)}</span></div>}
                         {theyPaidMe > 0 && <div className="flex justify-between"><span className="text-muted-foreground">{m.name} already settled with you</span><span className="font-medium text-danger">-{formatINR(theyPaidMe)}</span></div>}
                         {iPaidThem > 0 && <div className="flex justify-between"><span className="text-muted-foreground">You already settled with {m.name}</span><span className="font-medium text-primary">+{formatINR(iPaidThem)}</span></div>}
-                        <div className="flex justify-between border-t border-border pt-1.5 font-semibold">
-                          <span>Available balance</span>
-                          <span className={avail > 0.01 ? "text-primary" : avail < -0.01 ? "text-danger" : ""}>{formatINR(avail)}</span>
+                        <div className="flex justify-between border-t border-border pt-1.5">
+                          <span className="text-muted-foreground">Total balance</span>
+                          <span className="font-medium">{formatINR(avail)}</span>
                         </div>
                         {bothSettled ? (
                           <p className="pt-0.5 text-[11px] text-muted-foreground/80">
