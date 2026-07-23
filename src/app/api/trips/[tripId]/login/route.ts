@@ -7,7 +7,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ tripId:
     const { tripId } = await params;
     const body = await req.json();
     const password = String(body.password || "");
-    const trip = await db.trip.findUnique({ where: { tripId }, include: { members: true } });
+    // Creator = earliest-joined member; DB row order is not guaranteed, so sort explicitly.
+    const trip = await db.trip.findUnique({ where: { tripId }, include: { members: { orderBy: { joinedAt: "asc" } } } });
     if (!trip) return NextResponse.json({ error: "Trip not found." }, { status: 404 });
     if (trip.password !== password) {
       return NextResponse.json({ error: "Incorrect password." }, { status: 403 });

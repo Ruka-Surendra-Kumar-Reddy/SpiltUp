@@ -36,6 +36,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ tripId:
     const explanation = String(body.explanation || "").trim();
     const participants: string[] = Array.isArray(body.participants) ? body.participants.filter(Boolean) : [];
     const customAmounts: Record<string, number> = body.customAmounts || {};
+    const customNotes: Record<string, string> = body.customNotes || {};
 
     if (!description) return NextResponse.json({ error: "Description is required." }, { status: 400 });
     if (!Number.isFinite(amount) || amount <= 0) return NextResponse.json({ error: "Amount must be a positive number." }, { status: 400 });
@@ -49,13 +50,15 @@ export async function POST(req: Request, { params }: { params: Promise<{ tripId:
       }
     }
 
-    let splits: { memberId: string; amount: number }[] = [];
+    let splits: { memberId: string; amount: number; note?: string }[] = [];
     if (splitType === "equal") {
-      if (!reason) return NextResponse.json({ error: "Reason is required for equal split." }, { status: 400 });
       splits = computeEqualSplits(amount, participants);
     } else {
-      if (!explanation) return NextResponse.json({ error: "Explanation is required for custom split." }, { status: 400 });
-      splits = participants.map((p) => ({ memberId: p, amount: round2(Number(customAmounts[p] || 0)) }));
+      splits = participants.map((p) => ({
+        memberId: p,
+        amount: round2(Number(customAmounts[p] || 0)),
+        note: String(customNotes[p] || "").trim(),
+      }));
       const sum = round2(splits.reduce((a, s) => a + s.amount, 0));
       if (Math.abs(sum - round2(amount)) > 0.01) {
         return NextResponse.json({ error: `Custom amounts (₹${sum}) must equal the total (₹${round2(amount)}).` }, { status: 400 });

@@ -4,7 +4,8 @@
 // related tables for queryability; API responses shape them as embedded arrays.
 
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
 }
 
 datasource db {

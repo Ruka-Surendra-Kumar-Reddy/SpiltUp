@@ -10,6 +10,7 @@ export interface Member {
 export interface Split {
   memberId: string;
   amount: number;
+  note?: string; // optional per-person note for custom splits ("why 50")
 }
 
 export interface Expense {

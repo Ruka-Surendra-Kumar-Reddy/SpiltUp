@@ -221,6 +221,9 @@ function ExpenseForm({
   const [customAmounts, setCustomAmounts] = useState<Record<string, string>>(
     editing ? Object.fromEntries(editing.splits.map((s) => [s.memberId, String(s.amount)])) : {}
   );
+  const [customNotes, setCustomNotes] = useState<Record<string, string>>(
+    editing ? Object.fromEntries(editing.splits.map((s) => [s.memberId, s.note || ""])) : {}
+  );
   const [busy, setBusy] = useState(false);
 
   const cats = allCategories(trip);
@@ -236,9 +239,7 @@ function ExpenseForm({
     if (!description.trim()) return toast("Enter a description.", "error");
     if (!Number.isFinite(amt) || amt <= 0) return toast("Enter a valid amount.", "error");
     if (participants.length === 0) return toast("Select at least one participant.", "error");
-    if (splitType === "equal" && !reason.trim()) return toast("Reason is required for equal split.", "error");
     if (splitType === "custom") {
-      if (!explanation.trim()) return toast("Explanation is required for custom split.", "error");
       if (Math.abs(customSum - round2(amt)) > 0.01) {
         return toast(`Custom total (₹${formatNum(customSum)}) must equal ₹${formatNum(amt)}.`, "error");
       }
@@ -256,6 +257,7 @@ function ExpenseForm({
         explanation: explanation.trim(),
         participants,
         customAmounts: Object.fromEntries(participants.map((p) => [p, Number(customAmounts[p] || 0)])),
+        customNotes: Object.fromEntries(participants.map((p) => [p, (customNotes[p] || "").trim()])),
       };
       const url = editing
         ? `/api/trips/${trip.tripId}/expenses/${editing.expenseId}`
@@ -359,12 +361,14 @@ function ExpenseForm({
 
       {splitType === "equal" ? (
         <>
-          <Field label="Reason" required hint="Why this split is fair (shown to everyone).">
+          <Field label="Reason (optional)" hint="Why this split is fair (shown to everyone).">
             <Inp placeholder="e.g. Split equally among everyone who ate" value={reason} onChange={(e) => setReason(e.target.value)} />
           </Field>
           {amt > 0 && participants.length > 0 && (
             <div className="rounded-xl border border-border bg-background/40 p-3">
-              <p className="mb-2 text-xs font-medium text-muted-foreground">Each pays</p>
+              <p className="mb-2 text-xs font-medium text-muted-foreground">
+                Each pays · {formatINR(amt)} ÷ {participants.length}
+              </p>
               <div className="flex flex-wrap gap-2">
                 {equalSplits.map((s) => (
                   <Badge key={s.memberId} tone="primary">
@@ -372,16 +376,24 @@ function ExpenseForm({
                   </Badge>
                 ))}
               </div>
+              {new Set(equalSplits.map((s) => s.amount)).size > 1 && (
+                <p className="mt-2 text-[11px] text-muted-foreground">
+                  <i className="fa-solid fa-circle-info mr-1 text-primary" />
+                  {formatINR(amt)} doesn't divide evenly by {participants.length}, so the first{" "}
+                  {equalSplits.filter((s) => s.amount > equalSplits[equalSplits.length - 1].amount).length} member(s) pay ₹0.01 extra.
+                  The shares always add up to exactly {formatINR(amt)} — nothing is lost.
+                </p>
+              )}
             </div>
           )}
         </>
       ) : (
         <>
-          <Field label="Explanation" required hint="Why the amounts are split this way.">
+          <Field label="Explanation (optional)" hint="Why the amounts are split this way.">
             <Txt rows={2} placeholder="e.g. Ate more, B drank wine" value={explanation} onChange={(e) => setExplanation(e.target.value)} />
           </Field>
           <div className="rounded-xl border border-border bg-background/40 p-3 space-y-2">
-            <p className="text-xs font-medium text-muted-foreground">Enter each person's share</p>
+            <p className="text-xs font-medium text-muted-foreground">Enter each person's share (note optional — e.g. "why 50")</p>
             {participants.length === 0 && <p className="text-xs text-muted-foreground">Select participants first.</p>}
             {participants.map((p) => (
               <div key={p} className="flex items-center gap-2">
@@ -392,6 +404,12 @@ function ExpenseForm({
                   placeholder="0"
                   value={customAmounts[p] || ""}
                   onChange={(e) => setCustomAmounts((prev) => ({ ...prev, [p]: e.target.value }))}
+                  className="py-2 w-28 shrink-0"
+                />
+                <Inp
+                  placeholder="Note (optional)"
+                  value={customNotes[p] || ""}
+                  onChange={(e) => setCustomNotes((prev) => ({ ...prev, [p]: e.target.value }))}
                   className="py-2"
                 />
               </div>
@@ -568,6 +586,7 @@ export default function Home() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [pendingJoins, setPendingJoins] = useState<PendingJoinRow[]>([]);
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const [expFilter, setExpFilter] = useState<"all" | "approved" | "pending">("all");
 
   const toast = useCallback((message: string, type: ToastType = "info") => {
     const id = Date.now() + Math.random();
@@ -606,6 +625,26 @@ export default function Home() {
     }
   }, [toast]);
 
+  /** Load a trip for the join screen with retries, so a transient network/server
+      hiccup doesn't flash "Trip not found". No toast — the screen shows the state. */
+  const loadJoinTrip = useCallback(async (tid: string) => {
+    setJoinLoading(true);
+    let t: Trip | null = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt > 0) await new Promise((r) => setTimeout(r, 700));
+      try {
+        const data = await api<{ trip: Trip }>(`/api/trips/${tid}`);
+        t = data.trip;
+        break;
+      } catch {
+        // retry
+      }
+    }
+    setJoinTrip(t);
+    if (t) setTrip(t);
+    setJoinLoading(false);
+  }, []);
+
   const fetchPendingJoins = useCallback(async (tripId: string, password: string) => {
     try {
       const data = await api<{ pending: PendingJoinRow[] }>(
@@ -624,12 +663,9 @@ export default function Home() {
       if (hash.startsWith("#join-")) {
         const tid = hash.slice(6).toUpperCase();
         setJoinTripId(tid);
-        setJoinLoading(true);
-        const t = await fetchTrip(tid);
-        setJoinTrip(t);
-        setJoinLoading(false);
         setView("join");
         setLoading(false);
+        loadJoinTrip(tid);
         // Show the "how it works" onboarding the first time someone opens a share link
         // in this browser session (remembered in sessionStorage so it doesn't nag).
         try {
@@ -666,11 +702,8 @@ export default function Home() {
       if (hash.startsWith("#join-")) {
         const tid = hash.slice(6).toUpperCase();
         setJoinTripId(tid);
-        setJoinLoading(true);
-        const t = await fetchTrip(tid);
-        setJoinTrip(t);
-        setJoinLoading(false);
         setView("join");
+        loadJoinTrip(tid);
         try {
           if (!sessionStorage.getItem(ONBOARDING_KEY)) setShowOnboarding(true);
         } catch {}
@@ -680,7 +713,7 @@ export default function Home() {
     };
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
-  }, [fetchTrip, view]);
+  }, [loadJoinTrip, view]);
 
   /* ---------- onboarding handlers ---------- */
   const closeOnboarding = useCallback(() => {
@@ -1027,10 +1060,17 @@ export default function Home() {
                   <i className="fa-solid fa-triangle-exclamation text-xl" />
                 </div>
                 <h2 className="mt-3 font-heading text-lg font-semibold">Trip not found</h2>
-                <p className="mt-1 text-sm text-muted-foreground">No trip exists with ID <span className="font-mono text-foreground">{joinTripId}</span>.</p>
-                <Btn variant="outline" className="mt-4" onClick={() => { history.replaceState(null, "", window.location.pathname); setView("landing"); }}>
-                  <i className="fa-solid fa-house" /> Go Home
-                </Btn>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  We couldn't load trip <span className="font-mono text-foreground">{joinTripId}</span>. It may not exist, or there was a connection problem.
+                </p>
+                <div className="mt-4 flex justify-center gap-2">
+                  <Btn variant="primary" onClick={() => loadJoinTrip(joinTripId)}>
+                    <i className="fa-solid fa-rotate-right" /> Retry
+                  </Btn>
+                  <Btn variant="outline" onClick={() => { history.replaceState(null, "", window.location.pathname); setView("landing"); }}>
+                    <i className="fa-solid fa-house" /> Go Home
+                  </Btn>
+                </div>
               </div>
             ) : joinTrip.isClosed ? (
               <div className="py-6 text-center">
@@ -1086,11 +1126,10 @@ export default function Home() {
      ===================================================== */
   function renderDashboard() {
     if (!trip || !me) return null;
-    return session?.role === "creator" ? (
-      <CreatorDashboard />
-    ) : (
-      <MemberDashboard />
-    );
+    // Called as plain functions (not JSX components): components defined inside Home
+    // get a fresh identity every render, which made React remount the whole subtree
+    // and wipe in-progress form state (e.g. when a toast auto-dismissed).
+    return session?.role === "creator" ? CreatorDashboard() : MemberDashboard();
   }
 
   /* ---------- Creator Dashboard ---------- */
@@ -1199,12 +1238,12 @@ export default function Home() {
                   <i className="fa-solid fa-lock" /> This trip is closed. New expenses, handovers, and members are disabled. Settlements remain active.
                 </div>
               )}
-              {creatorTab === "overview" && <OverviewTab />}
-              {creatorTab === "members" && <MembersTab />}
-              {creatorTab === "expenses" && <ExpensesTab />}
-              {creatorTab === "handovers" && <HandoversTab />}
-              {creatorTab === "settlements" && <SettlementsTab />}
-              {creatorTab === "pending" && <PendingTab />}
+              {creatorTab === "overview" && OverviewTab()}
+              {creatorTab === "members" && MembersTab()}
+              {creatorTab === "expenses" && ExpensesTab()}
+              {creatorTab === "handovers" && HandoversTab()}
+              {creatorTab === "settlements" && SettlementsTab()}
+              {creatorTab === "pending" && PendingTab()}
               {creatorTab === "settings" && (
                 <SettingsInline trip={trip} password={session?.password || ""} onSave={saveSettings} onCloseTrip={closeTrip} onDeleteTrip={deleteTrip} onShare={shareLink} />
               )}
@@ -1278,7 +1317,7 @@ export default function Home() {
               <i className="fa-solid fa-lock" /> This trip is closed. You can't add new entries.
             </div>
           )}
-          {memberTab === "myview" && <MyViewTab />}
+          {memberTab === "myview" && MyViewTab()}
           {memberTab === "addexp" && (
             trip.isClosed ? <Empty icon="fa-solid fa-lock" title="Trip is closed" message="New expenses can't be added." /> :
             <div className="rounded-2xl border border-border bg-card p-5">
@@ -1293,7 +1332,7 @@ export default function Home() {
               <HandoverForm trip={trip} memberId={me.memberId} toast={toast} onSuccess={(t) => { setTrip(t); setMemberTab("history"); }} onCancel={() => setMemberTab("myview")} />
             </div>
           )}
-          {memberTab === "history" && <HistoryTab />}
+          {memberTab === "history" && HistoryTab()}
         </main>
       </div>
     );
@@ -1455,10 +1494,9 @@ export default function Home() {
   }
 
   function ExpensesTab() {
-    const [filter, setFilter] = useState<"all" | "approved" | "pending">("all");
     if (!trip || !me) return null;
     const list = trip.expenses
-      .filter((e) => filter === "all" || e.status === filter)
+      .filter((e) => expFilter === "all" || e.status === expFilter)
       .sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
     return (
       <div className="space-y-5">
@@ -1471,7 +1509,7 @@ export default function Home() {
         </header>
         <div className="flex gap-2">
           {(["all", "approved", "pending"] as const).map((f) => (
-            <button key={f} onClick={() => setFilter(f)} className={`rounded-lg px-3 py-1.5 text-xs font-medium capitalize transition-colors ${filter === f ? "bg-primary text-primary-foreground" : "bg-secondary text-muted-foreground hover:text-foreground"}`}>
+            <button key={f} onClick={() => setExpFilter(f)} className={`rounded-lg px-3 py-1.5 text-xs font-medium capitalize transition-colors ${expFilter === f ? "bg-primary text-primary-foreground" : "bg-secondary text-muted-foreground hover:text-foreground"}`}>
               {f}
             </button>
           ))}
@@ -1504,15 +1542,20 @@ export default function Home() {
               <CategoryChip id={e.category} trip={trip} />
             </div>
             <p className="mt-1 text-xs text-muted-foreground">
-              Paid by <span className="text-foreground">{memberName(trip, e.paidBy)}</span> · {timeAgo(e.createdAt)}
+              Paid by <span className="text-foreground">{memberName(trip, e.paidBy)}</span> · added by <span className="text-foreground">{memberName(trip, e.createdBy)}</span> · {timeAgo(e.createdAt)} · {e.splitType === "equal" ? "equal split" : "custom split"}
             </p>
             <div className="mt-2 flex flex-wrap gap-1.5">
               {e.splits.map((s) => (
-                <span key={s.memberId} className="rounded-md bg-secondary/60 px-2 py-0.5 text-[11px] text-muted-foreground">
+                <span key={s.memberId} className={`rounded-md px-2 py-0.5 text-[11px] ${s.memberId === e.paidBy ? "bg-primary/10 text-primary" : "bg-secondary/60 text-muted-foreground"}`}>
                   {memberName(trip, s.memberId)}: {formatINR(s.amount)}
+                  {s.memberId === e.paidBy && " (paid)"}
+                  {s.note && <span className="italic opacity-80"> — {s.note}</span>}
                 </span>
               ))}
             </div>
+            {e.splitType === "equal" && new Set(e.splits.map((s) => s.amount)).size > 1 && (
+              <p className="mt-1.5 text-[11px] text-muted-foreground"><i className="fa-solid fa-circle-info mr-1 text-primary" />Shares differ by ₹0.01 due to paise rounding — they add up to exactly {formatINR(e.amount)}.</p>
+            )}
             {e.splitType === "equal" && e.reason && <p className="mt-2 text-xs text-muted-foreground"><i className="fa-solid fa-quote-left mr-1 opacity-50" />{e.reason}</p>}
             {e.splitType === "custom" && e.explanation && <p className="mt-2 text-xs text-muted-foreground"><i className="fa-solid fa-quote-left mr-1 opacity-50" />{e.explanation}</p>}
           </div>
@@ -1603,19 +1646,66 @@ export default function Home() {
 
         {/* balances */}
         <section className="rounded-2xl border border-border bg-card p-5">
-          <h3 className="mb-3 font-heading font-semibold">Net Balances</h3>
+          <h3 className="mb-1 font-heading font-semibold">Net Balances</h3>
+          <p className="mb-3 text-xs text-muted-foreground">Tap a member to see which expenses &amp; handovers make up their balance.</p>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             {trip.members.map((m) => {
               const b = balances.find((x) => x.memberId === m.memberId);
               const net = b?.net || 0;
+              const paidExp = trip.expenses.filter((e) => e.status === "approved" && e.paidBy === m.memberId);
+              const shares = trip.expenses
+                .filter((e) => e.status === "approved")
+                .map((e) => ({ e, amt: e.splits.find((s) => s.memberId === m.memberId)?.amount || 0 }))
+                .filter((x) => x.amt > 0);
+              const hos = trip.handovers.filter((h) => h.fromId === m.memberId || h.toId === m.memberId);
+              const setts = trip.settlements.filter((s) => s.status !== "pending" && (s.fromId === m.memberId || s.toId === m.memberId));
               return (
-                <div key={m.memberId} className="flex items-center gap-3 rounded-xl bg-background/40 px-3 py-2.5">
-                  <Avatar name={m.name} size={32} />
-                  <span className="min-w-0 flex-1 truncate text-sm font-medium">{m.name}</span>
-                  <span className={`text-sm font-semibold ${net > 0.01 ? "text-primary" : net < -0.01 ? "text-danger" : "text-muted-foreground"}`}>
-                    {net > 0.01 ? `+${formatINR(net)}` : net < -0.01 ? formatINR(net) : "settled"}
-                  </span>
-                </div>
+                <details key={m.memberId} className="group rounded-xl bg-background/40">
+                  <summary className="flex cursor-pointer list-none items-center gap-3 px-3 py-2.5 [&::-webkit-details-marker]:hidden">
+                    <Avatar name={m.name} size={32} />
+                    <span className="min-w-0 flex-1 truncate text-sm font-medium">{m.name}</span>
+                    <span className={`text-sm font-semibold ${net > 0.01 ? "text-primary" : net < -0.01 ? "text-danger" : "text-muted-foreground"}`}>
+                      {net > 0.01 ? `+${formatINR(net)}` : net < -0.01 ? formatINR(net) : "settled"}
+                    </span>
+                    <i className="fa-solid fa-chevron-down text-xs text-muted-foreground transition-transform group-open:rotate-180" />
+                  </summary>
+                  <div className="space-y-1.5 border-t border-border px-3 py-2.5 text-xs">
+                    <div className="flex justify-between font-medium"><span>Paid for expenses</span><span className="text-primary">+{formatINR(b?.paid || 0)}</span></div>
+                    {paidExp.map((e) => (
+                      <div key={e.expenseId} className="flex justify-between pl-3 text-muted-foreground"><span className="truncate">{e.description}</span><span className="shrink-0">+{formatINR(e.amount)}</span></div>
+                    ))}
+                    <div className="flex justify-between font-medium"><span>Share of expenses</span><span className="text-danger">-{formatINR(b?.share || 0)}</span></div>
+                    {shares.map(({ e, amt }) => (
+                      <div key={e.expenseId} className="flex justify-between pl-3 text-muted-foreground"><span className="truncate">{e.description}</span><span className="shrink-0">-{formatINR(amt)}</span></div>
+                    ))}
+                    {hos.length > 0 && (
+                      <>
+                        <div className="flex justify-between font-medium"><span>Handovers</span><span>{formatINR((b?.handoverGiven || 0) - (b?.handoverReceived || 0))}</span></div>
+                        {hos.map((h) => (
+                          <div key={h.handoverId} className="flex justify-between pl-3 text-muted-foreground">
+                            <span className="truncate">{memberName(trip, h.fromId)} → {memberName(trip, h.toId)}{h.note && ` (${h.note})`}</span>
+                            <span className="shrink-0">{h.fromId === m.memberId ? "+" : "-"}{formatINR(h.amount)}</span>
+                          </div>
+                        ))}
+                      </>
+                    )}
+                    {setts.length > 0 && (
+                      <>
+                        <div className="flex justify-between font-medium"><span>Settlements (paid/completed)</span><span>{formatINR((b?.settlementGiven || 0) - (b?.settlementReceived || 0))}</span></div>
+                        {setts.map((s) => (
+                          <div key={s.id} className="flex justify-between pl-3 text-muted-foreground">
+                            <span className="truncate">{memberName(trip, s.fromId)} → {memberName(trip, s.toId)}</span>
+                            <span className="shrink-0">{s.fromId === m.memberId ? "+" : "-"}{formatINR(s.amount)}</span>
+                          </div>
+                        ))}
+                      </>
+                    )}
+                    <div className="flex justify-between border-t border-border pt-1.5 font-semibold">
+                      <span>Net</span>
+                      <span className={net > 0.01 ? "text-primary" : net < -0.01 ? "text-danger" : ""}>{formatINR(net)}</span>
+                    </div>
+                  </div>
+                </details>
               );
             })}
           </div>
@@ -1720,6 +1810,9 @@ export default function Home() {
     if (!trip || !me) return null;
     const b = balances.find((x) => x.memberId === me.memberId);
     const net = b?.net || 0;
+    const myInvolved = trip.expenses
+      .filter((e) => e.status === "approved" && (e.paidBy === me.memberId || e.splits.some((s) => s.memberId === me.memberId)))
+      .sort((a, c) => +new Date(c.createdAt) - +new Date(a.createdAt));
     const myExpenses = trip.expenses.filter((e) => e.status === "approved" && e.paidBy === me.memberId);
     const myShare = trip.expenses.filter((e) => e.status === "approved").reduce((a, e) => a + (e.splits.find((s) => s.memberId === me.memberId)?.amount || 0), 0);
     const myPaid = myExpenses.reduce((a, e) => a + e.amount, 0);
@@ -1791,6 +1884,52 @@ export default function Home() {
             )}
           </section>
         </div>
+
+        {/* Bug 4: per-expense breakdown — what each expense cost me and who owes what */}
+        <section className="rounded-2xl border border-border bg-card p-5">
+          <h3 className="mb-3 flex items-center gap-2 font-heading font-semibold"><i className="fa-solid fa-list-ul text-primary" /> Your Expense Breakdown</h3>
+          {myInvolved.length === 0 ? <p className="text-sm text-muted-foreground">No approved expenses involve you yet.</p> : (
+            <div className="space-y-2">
+              {myInvolved.map((e) => {
+                const mine = e.splits.find((s) => s.memberId === me.memberId)?.amount || 0;
+                return (
+                  <details key={e.expenseId} className="group rounded-xl bg-background/40">
+                    <summary className="flex cursor-pointer list-none items-center gap-3 px-3 py-2.5 [&::-webkit-details-marker]:hidden">
+                      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg" style={{ background: `${categoryMeta(e.category, trip).color}22`, color: categoryMeta(e.category, trip).color }}>
+                        <i className={`fa-solid ${categoryMeta(e.category, trip).icon} text-xs`} />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm">{e.description}</span>
+                        <span className="block text-[11px] text-muted-foreground">Paid by {memberName(trip, e.paidBy)} · total {formatINR(e.amount)}</span>
+                      </span>
+                      <span className={`text-sm font-semibold ${e.paidBy === me.memberId ? "text-primary" : "text-danger"}`}>
+                        {e.paidBy === me.memberId ? `+${formatINR(e.amount - mine)}` : `-${formatINR(mine)}`}
+                      </span>
+                      <i className="fa-solid fa-chevron-down text-xs text-muted-foreground transition-transform group-open:rotate-180" />
+                    </summary>
+                    <div className="border-t border-border px-3 py-2.5 text-xs">
+                      <p className="text-muted-foreground">Your share: <span className="font-semibold text-foreground">{formatINR(mine)}</span>{e.paidBy === me.memberId && <> · You paid {formatINR(e.amount)}, so others owe you <span className="font-semibold text-primary">{formatINR(e.amount - mine)}</span></>}</p>
+                      {(e.reason || e.explanation) && <p className="mt-1 text-muted-foreground"><i className="fa-solid fa-quote-left mr-1 opacity-50" />{e.splitType === "equal" ? e.reason : e.explanation}</p>}
+                      <div className="mt-2 space-y-1">
+                        {e.splits.map((s) => (
+                          <div key={s.memberId} className="flex items-center justify-between gap-2">
+                            <span className={s.memberId === me.memberId ? "font-medium text-foreground" : "text-muted-foreground"}>
+                              {memberName(trip, s.memberId)}{s.memberId === me.memberId && " (you)"}
+                              {s.note && <span className="ml-1.5 italic text-muted-foreground/80">— {s.note}</span>}
+                            </span>
+                            <span className="shrink-0">
+                              {s.memberId === e.paidBy ? <span className="text-muted-foreground">own share {formatINR(s.amount)}</span> : <>owes {memberName(trip, e.paidBy)} <span className="font-medium text-foreground">{formatINR(s.amount)}</span></>}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </details>
+                );
+              })}
+            </div>
+          )}
+        </section>
       </div>
     );
   }
