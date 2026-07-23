@@ -1967,6 +1967,44 @@ export default function Home() {
       );
     };
 
+    // Per-partner handover ledger with live outstanding amounts (walk to 0 as payments complete)
+    const isSettled = (id: string) => Math.abs(balances.find((x) => x.memberId === id)?.net || 0) < 0.01;
+    const handoverPartners = trip.members
+      .filter((m) => m.memberId !== me.memberId && trip.handovers.some((h) => (h.fromId === me.memberId && h.toId === m.memberId) || (h.fromId === m.memberId && h.toId === me.memberId)))
+      .map((m) => {
+        const given = trip.handovers.filter((h) => h.fromId === me.memberId && h.toId === m.memberId).reduce((a, h) => a + h.amount, 0);
+        const received = trip.handovers.filter((h) => h.fromId === m.memberId && h.toId === me.memberId).reduce((a, h) => a + h.amount, 0);
+        const myShareExp = trip.expenses.filter((e) => e.status === "approved" && e.paidBy === m.memberId && (e.splits.find((sp) => sp.memberId === me.memberId)?.amount || 0) > 0);
+        const theirShareExp = trip.expenses.filter((e) => e.status === "approved" && e.paidBy === me.memberId && (e.splits.find((sp) => sp.memberId === m.memberId)?.amount || 0) > 0);
+        const myShareOfTheirs = myShareExp.reduce((a, e) => a + (e.splits.find((sp) => sp.memberId === me.memberId)?.amount || 0), 0);
+        const theirShareOfMine = theirShareExp.reduce((a, e) => a + (e.splits.find((sp) => sp.memberId === m.memberId)?.amount || 0), 0);
+        const myShareNames = myShareExp.map((e) => e.description).join(", ");
+        const theirShareNames = theirShareExp.map((e) => e.description).join(", ");
+        const theyPaidMe = trip.settlements.filter((st) => st.status !== "pending" && st.fromId === m.memberId && st.toId === me.memberId).reduce((a, st) => a + st.amount, 0);
+        const iPaidThem = trip.settlements.filter((st) => st.status !== "pending" && st.fromId === me.memberId && st.toId === m.memberId).reduce((a, st) => a + st.amount, 0);
+        const avail = round2(given - received - myShareOfTheirs + theirShareOfMine - theyPaidMe + iPaidThem);
+        const directFromThem = trip.settlements.filter((st) => st.status !== "completed" && st.fromId === m.memberId && st.toId === me.memberId).reduce((a, st) => a + st.amount, 0);
+        const routed = round2(avail - directFromThem);
+        // they owe me: settled third parties who owed THEM already delivered part via netting
+        const collectedVia = trip.members
+          .filter((o) => o.memberId !== me.memberId && o.memberId !== m.memberId && isSettled(o.memberId))
+          .map((o) => ({ name: o.name, amt: round2(-pairNet(m.memberId, o.memberId)) }))
+          .filter((x) => x.amt > 0.01);
+        const collected = round2(collectedVia.reduce((a, x) => a + x.amt, 0));
+        const stillViaOthers = round2(Math.max(0, routed - collected));
+        // I owe them: settled third parties who owed ME discharged part of my debt
+        const dischargedVia = trip.members
+          .filter((o) => o.memberId !== me.memberId && o.memberId !== m.memberId && isSettled(o.memberId))
+          .map((o) => ({ name: o.name, amt: round2(-pairNet(me.memberId, o.memberId)) }))
+          .filter((x) => x.amt > 0.01);
+        const discharged = round2(dischargedVia.reduce((a, x) => a + x.amt, 0));
+        const bothSettled = Math.abs(balances.find((x) => x.memberId === me.memberId)?.net || 0) < 0.01 && isSettled(m.memberId);
+        const outstanding = bothSettled ? 0 : avail > 0.01 ? round2(Math.max(0, avail - collected)) : avail < -0.01 ? round2(Math.min(0, avail + discharged)) : 0;
+        return { m, given, received, myShareOfTheirs, theirShareOfMine, myShareNames, theirShareNames, theyPaidMe, iPaidThem, avail, directFromThem, collectedVia, collected, stillViaOthers, dischargedVia, discharged, bothSettled, outstanding };
+      });
+    const stillToCollect = round2(handoverPartners.reduce((a, p) => a + Math.max(0, p.outstanding), 0));
+    const stillToGive = round2(handoverPartners.reduce((a, p) => a + Math.max(0, -p.outstanding), 0));
+
     return (
       <div className="space-y-5">
         <div className="rounded-2xl border border-border bg-gradient-to-br from-card to-secondary/40 p-5">
@@ -1982,8 +2020,8 @@ export default function Home() {
         <div className="grid grid-cols-2 gap-3">
           <StatCard icon="fa-arrow-up" tone="primary" label="You Paid" value={formatINR(myPaid)} />
           <StatCard icon="fa-arrow-down" tone="danger" label="Your Share" value={formatINR(myShare)} />
-          <StatCard icon="fa-hand-holding-dollar" tone="warning" label="Handovers Given" value={formatINR(handGiven)} />
-          <StatCard icon="fa-hand-holding-dollar" tone="info" label="Handovers Received" value={formatINR(handReceived)} />
+          <StatCard icon="fa-hand-holding-dollar" tone="warning" label="Handovers Given" value={formatINR(handGiven)} sub={handGiven > 0 ? (stillToCollect > 0.01 ? `${formatINR(stillToCollect)} still to collect` : "fully settled") : undefined} />
+          <StatCard icon="fa-hand-holding-dollar" tone="info" label="Handovers Received" value={formatINR(handReceived)} sub={handReceived > 0 ? (stillToGive > 0.01 ? `${formatINR(stillToGive)} still to give` : "fully settled") : undefined} />
         </div>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -2050,94 +2088,68 @@ export default function Home() {
         {(handGiven > 0 || handReceived > 0) && (
           <section className="rounded-2xl border border-border bg-card p-5">
             <h3 className="mb-1 flex items-center gap-2 font-heading font-semibold"><i className="fa-solid fa-hand-holding-dollar text-warning" /> Handover Balances</h3>
-            <p className="mb-3 text-xs text-muted-foreground">What's left of the cash you handed over (or received), after your expense shares with that person.</p>
+            <p className="mb-3 text-xs text-muted-foreground">What's still outstanding with each person you exchanged cash with — goes to 0 as payments complete.</p>
             <div className="space-y-2">
-              {trip.members
-                .filter((m) => m.memberId !== me.memberId && trip.handovers.some((h) => (h.fromId === me.memberId && h.toId === m.memberId) || (h.fromId === m.memberId && h.toId === me.memberId)))
-                .map((m) => {
-                  const given = trip.handovers.filter((h) => h.fromId === me.memberId && h.toId === m.memberId).reduce((a, h) => a + h.amount, 0);
-                  const received = trip.handovers.filter((h) => h.fromId === m.memberId && h.toId === me.memberId).reduce((a, h) => a + h.amount, 0);
-                  const myShareOfTheirs = trip.expenses.filter((e) => e.status === "approved" && e.paidBy === m.memberId).reduce((a, e) => a + (e.splits.find((sp) => sp.memberId === me.memberId)?.amount || 0), 0);
-                  const theirShareOfMine = trip.expenses.filter((e) => e.status === "approved" && e.paidBy === me.memberId).reduce((a, e) => a + (e.splits.find((sp) => sp.memberId === m.memberId)?.amount || 0), 0);
-                  // money that already moved via settlements counts too
-                  const theyPaidMe = trip.settlements.filter((st) => st.status !== "pending" && st.fromId === m.memberId && st.toId === me.memberId).reduce((a, st) => a + st.amount, 0);
-                  const iPaidThem = trip.settlements.filter((st) => st.status !== "pending" && st.fromId === me.memberId && st.toId === m.memberId).reduce((a, st) => a + st.amount, 0);
-                  const avail = round2(given - received - myShareOfTheirs + theirShareOfMine - theyPaidMe + iPaidThem);
-                  // how the outstanding amount actually arrives: directly vs routed via netting
-                  const directFromThem = trip.settlements.filter((st) => st.status !== "completed" && st.fromId === m.memberId && st.toId === me.memberId).reduce((a, st) => a + st.amount, 0);
-                  const directToThem = trip.settlements.filter((st) => st.status !== "completed" && st.fromId === me.memberId && st.toId === m.memberId).reduce((a, st) => a + st.amount, 0);
-                  const routed = round2(avail - directFromThem + directToThem);
-                  const myNet = balances.find((x) => x.memberId === me.memberId)?.net || 0;
-                  const theirNet = balances.find((x) => x.memberId === m.memberId)?.net || 0;
-                  const bothSettled = Math.abs(myNet) < 0.01 && Math.abs(theirNet) < 0.01;
-                  // part of the routed amount already arrived: third parties who owed
-                  // this person and have fully settled (their payment carried it here)
-                  const collectedVia = trip.members
-                    .filter((o) => o.memberId !== me.memberId && o.memberId !== m.memberId)
-                    .filter((o) => Math.abs(balances.find((b) => b.memberId === o.memberId)?.net || 0) < 0.01)
-                    .map((o) => ({ name: o.name, amt: round2(-pairNet(m.memberId, o.memberId)) }))
-                    .filter((x) => x.amt > 0.01);
-                  const collected = round2(collectedVia.reduce((a, x) => a + x.amt, 0));
-                  const stillViaOthers = round2(routed - collected);
-                  // headline number: what's actually still to come, walks down to 0
-                  const outstanding = avail > 0.01 ? round2(avail - collected) : avail;
-                  return (
-                    <details key={m.memberId} className="group rounded-xl bg-background/40">
-                      <summary className="flex cursor-pointer list-none items-center gap-3 px-3 py-2.5 [&::-webkit-details-marker]:hidden">
-                        <Avatar name={m.name} size={32} />
-                        <span className="min-w-0 flex-1 truncate text-sm font-medium">{m.name}</span>
-                        <span className={`text-sm font-semibold ${bothSettled || Math.abs(outstanding) < 0.01 ? "text-muted-foreground" : outstanding > 0.01 ? "text-primary" : "text-danger"}`}>
-                          {bothSettled || Math.abs(outstanding) < 0.01 ? "settled" : outstanding > 0.01 ? `${formatINR(outstanding)} to collect` : `you owe ${formatINR(-outstanding)}`}
-                        </span>
-                        <i className="fa-solid fa-chevron-down text-xs text-muted-foreground transition-transform group-open:rotate-180" />
-                      </summary>
-                      <div className="space-y-1 border-t border-border px-3 py-2.5 text-xs">
-                        {given > 0 && <div className="flex justify-between"><span className="text-muted-foreground">You handed over to {m.name}</span><span className="font-medium text-primary">+{formatINR(given)}</span></div>}
-                        {received > 0 && <div className="flex justify-between"><span className="text-muted-foreground">{m.name} handed over to you</span><span className="font-medium text-danger">-{formatINR(received)}</span></div>}
-                        {myShareOfTheirs > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Your share of {m.name}'s expenses</span><span className="font-medium text-danger">-{formatINR(myShareOfTheirs)}</span></div>}
-                        {theirShareOfMine > 0 && <div className="flex justify-between"><span className="text-muted-foreground">{m.name}'s share of your expenses</span><span className="font-medium text-primary">+{formatINR(theirShareOfMine)}</span></div>}
-                        {theyPaidMe > 0 && <div className="flex justify-between"><span className="text-muted-foreground">{m.name} already settled with you</span><span className="font-medium text-danger">-{formatINR(theyPaidMe)}</span></div>}
-                        {iPaidThem > 0 && <div className="flex justify-between"><span className="text-muted-foreground">You already settled with {m.name}</span><span className="font-medium text-primary">+{formatINR(iPaidThem)}</span></div>}
-                        <div className="flex justify-between border-t border-border pt-1.5">
-                          <span className="text-muted-foreground">Total balance</span>
-                          <span className="font-medium">{formatINR(avail)}</span>
-                        </div>
-                        {bothSettled ? (
-                          <p className="pt-0.5 text-[11px] text-muted-foreground/80">
-                            <i className="fa-solid fa-circle-check mr-1 text-primary" />
-                            Fully settled{Math.abs(avail) > 0.01 ? ` — ${formatINR(Math.abs(avail))} of this was collected through other members' payments (smart netting)` : ""}.
-                          </p>
-                        ) : (
-                          <>
-                            {avail > 0.01 && collected > 0.01 && (
-                              <div className="flex justify-between pt-0.5">
-                                <span className="text-muted-foreground">Already collected via {collectedVia.map((x) => x.name).join(", ")}'s completed payment{collectedVia.length > 1 ? "s" : ""}</span>
-                                <span className="font-medium text-primary">-{formatINR(collected)}</span>
-                              </div>
-                            )}
-                            {avail > 0.01 && collected > 0.01 && (
-                              <div className="flex justify-between font-semibold">
-                                <span>Still outstanding</span>
-                                <span>{formatINR(round2(avail - collected))}</span>
-                              </div>
-                            )}
-                            {avail > 0.01 && (
-                              <p className="pt-0.5 text-[11px] text-muted-foreground/80">
-                                {directFromThem > 0.01 ? `${m.name} pays you ${formatINR(directFromThem)} directly (see settlements)` : `Nothing due directly from ${m.name}`}
-                                {stillViaOthers > 0.01 ? `; ${formatINR(stillViaOthers)} reaches you inside other members' payments via smart netting.` : "."}
-                              </p>
-                            )}
-                            {avail < -0.01 && (
-                              <p className="pt-0.5 text-[11px] text-muted-foreground/80">
-                                You effectively owe {m.name} {formatINR(-avail)} — counted in your net balance and settlements.
-                              </p>
-                            )}
-                          </>
-                        )}
+              {handoverPartners.map((p) => (
+                <details key={p.m.memberId} className="group rounded-xl bg-background/40">
+                  <summary className="flex cursor-pointer list-none items-center gap-3 px-3 py-2.5 [&::-webkit-details-marker]:hidden">
+                    <Avatar name={p.m.name} size={32} />
+                    <span className="min-w-0 flex-1 truncate text-sm font-medium">{p.m.name}</span>
+                    <span className={`text-sm font-semibold ${p.bothSettled || Math.abs(p.outstanding) < 0.01 ? "text-muted-foreground" : p.outstanding > 0.01 ? "text-primary" : "text-danger"}`}>
+                      {p.bothSettled || Math.abs(p.outstanding) < 0.01 ? "settled" : p.outstanding > 0.01 ? `${formatINR(p.outstanding)} to collect` : `you owe ${formatINR(-p.outstanding)}`}
+                    </span>
+                    <i className="fa-solid fa-chevron-down text-xs text-muted-foreground transition-transform group-open:rotate-180" />
+                  </summary>
+                  <div className="space-y-1 border-t border-border px-3 py-2.5 text-xs">
+                    {p.given > 0 && <div className="flex justify-between"><span className="text-muted-foreground">You handed over to {p.m.name}</span><span className="font-medium text-primary">+{formatINR(p.given)}</span></div>}
+                    {p.received > 0 && <div className="flex justify-between"><span className="text-muted-foreground">{p.m.name} handed over to you</span><span className="font-medium text-danger">-{formatINR(p.received)}</span></div>}
+                    {p.myShareOfTheirs > 0 && <div className="flex justify-between gap-2"><span className="min-w-0 truncate text-muted-foreground">Your share of {p.m.name}'s expenses ({p.myShareNames})</span><span className="shrink-0 font-medium text-danger">-{formatINR(p.myShareOfTheirs)}</span></div>}
+                    {p.theirShareOfMine > 0 && <div className="flex justify-between gap-2"><span className="min-w-0 truncate text-muted-foreground">{p.m.name}'s share of your expenses ({p.theirShareNames})</span><span className="shrink-0 font-medium text-primary">+{formatINR(p.theirShareOfMine)}</span></div>}
+                    {p.theyPaidMe > 0 && <div className="flex justify-between"><span className="text-muted-foreground">{p.m.name} already settled with you</span><span className="font-medium text-danger">-{formatINR(p.theyPaidMe)}</span></div>}
+                    {p.iPaidThem > 0 && <div className="flex justify-between"><span className="text-muted-foreground">You already settled with {p.m.name}</span><span className="font-medium text-primary">+{formatINR(p.iPaidThem)}</span></div>}
+                    <div className="flex justify-between border-t border-border pt-1.5">
+                      <span className="text-muted-foreground">Total balance between you two</span>
+                      <span className="font-medium">{formatINR(p.avail)}</span>
+                    </div>
+                    {p.avail > 0.01 && p.collected > 0.01 && (
+                      <div className="flex justify-between gap-2">
+                        <span className="min-w-0 truncate text-muted-foreground">Already collected via {p.collectedVia.map((x) => x.name).join(", ")}'s completed payment{p.collectedVia.length > 1 ? "s" : ""}</span>
+                        <span className="shrink-0 font-medium text-primary">-{formatINR(p.collected)}</span>
                       </div>
-                    </details>
-                  );
-                })}
+                    )}
+                    {p.avail < -0.01 && p.discharged > 0.01 && (
+                      <div className="flex justify-between gap-2">
+                        <span className="min-w-0 truncate text-muted-foreground">Already covered via {p.dischargedVia.map((x) => x.name).join(", ")}'s completed payment{p.dischargedVia.length > 1 ? "s" : ""}</span>
+                        <span className="shrink-0 font-medium text-primary">+{formatINR(p.discharged)}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between border-t border-border pt-1.5 font-semibold">
+                      <span>{p.outstanding >= -0.01 ? "Still to collect" : "You still owe"}</span>
+                      <span className={p.outstanding > 0.01 ? "text-primary" : p.outstanding < -0.01 ? "text-danger" : ""}>{formatINR(Math.abs(p.outstanding))}</span>
+                    </div>
+                    {p.bothSettled ? (
+                      <p className="pt-0.5 text-[11px] text-muted-foreground/80">
+                        <i className="fa-solid fa-circle-check mr-1 text-primary" />
+                        Fully settled — every rupee accounted for.
+                      </p>
+                    ) : (
+                      <>
+                        {p.outstanding > 0.01 && (
+                          <p className="pt-0.5 text-[11px] text-muted-foreground/80">
+                            {p.directFromThem > 0.01 ? `${p.m.name} pays you ${formatINR(p.directFromThem)} directly (see settlements)` : `Nothing due directly from ${p.m.name}`}
+                            {p.stillViaOthers > 0.01 ? `; ${formatINR(p.stillViaOthers)} reaches you inside other members' payments via smart netting.` : "."}
+                          </p>
+                        )}
+                        {p.outstanding < -0.01 && (
+                          <p className="pt-0.5 text-[11px] text-muted-foreground/80">
+                            Counted in your net balance — settle it via the payments in "You Need to Pay".
+                          </p>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </details>
+              ))}
             </div>
           </section>
         )}
@@ -2255,7 +2267,7 @@ export default function Home() {
 /* =====================================================================
    Small shared components (outside main for reusability)
    ===================================================================== */
-function StatCard({ icon, label, value, tone = "muted" }: { icon: string; label: string; value: string; tone?: "primary" | "warning" | "danger" | "muted" | "info" }) {
+function StatCard({ icon, label, value, sub, tone = "muted" }: { icon: string; label: string; value: string; sub?: string; tone?: "primary" | "warning" | "danger" | "muted" | "info" }) {
   const tones: Record<string, string> = {
     primary: "bg-primary/10 text-primary",
     warning: "bg-warning/10 text-warning",
@@ -2270,6 +2282,7 @@ function StatCard({ icon, label, value, tone = "muted" }: { icon: string; label:
       </div>
       <p className="mt-2.5 text-[11px] uppercase tracking-wide text-muted-foreground">{label}</p>
       <p className="mt-0.5 font-heading text-xl font-bold">{value}</p>
+      {sub && <p className="mt-0.5 text-[11px] text-muted-foreground">{sub}</p>}
     </div>
   );
 }
