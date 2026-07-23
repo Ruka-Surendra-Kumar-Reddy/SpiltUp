@@ -1849,6 +1849,55 @@ export default function Home() {
     const iOwe = trip.settlements.filter((s) => s.fromId === me.memberId && s.status !== "completed");
     const owesMe = trip.settlements.filter((s) => s.toId === me.memberId && s.status !== "completed");
 
+    // Per-expense lines between me and one other member.
+    // amt > 0 = adds to what I owe them; amt < 0 = adds to what they owe me.
+    const pairLines = (otherId: string) => {
+      const lines: { label: string; amt: number }[] = [];
+      for (const e of trip.expenses) {
+        if (e.status !== "approved") continue;
+        const myShare = e.splits.find((s) => s.memberId === me.memberId)?.amount || 0;
+        const theirShare = e.splits.find((s) => s.memberId === otherId)?.amount || 0;
+        if (e.paidBy === otherId && myShare > 0) lines.push({ label: e.description, amt: myShare });
+        if (e.paidBy === me.memberId && theirShare > 0) lines.push({ label: e.description, amt: -theirShare });
+      }
+      for (const h of trip.handovers) {
+        if (h.fromId === me.memberId && h.toId === otherId) lines.push({ label: `Handover${h.note ? ` (${h.note})` : ""}`, amt: -h.amount });
+        if (h.fromId === otherId && h.toId === me.memberId) lines.push({ label: `Handover${h.note ? ` (${h.note})` : ""}`, amt: h.amount });
+      }
+      return lines;
+    };
+
+    // sign: +1 when the row is "I pay them", -1 when the row is "they pay me"
+    const settleBreakdown = (otherId: string, total: number, sign: 1 | -1) => {
+      const lines = pairLines(otherId);
+      const sum = round2(lines.reduce((a, l) => a + sign * l.amt, 0));
+      return (
+        <div className="mt-1 space-y-1 border-t border-border pt-2 text-xs">
+          {lines.length === 0 ? (
+            <p className="text-muted-foreground">No direct expenses between you two — this comes from smart netting across the group.</p>
+          ) : (
+            lines.map((l, i) => {
+              const v = sign * l.amt;
+              return (
+                <div key={i} className="flex items-center justify-between gap-2">
+                  <span className="truncate text-muted-foreground">{l.label}</span>
+                  <span className={`shrink-0 font-medium ${v >= 0 ? "" : "text-primary"}`}>
+                    {v >= 0 ? formatINR(v) : `−${formatINR(-v)}`}
+                  </span>
+                </div>
+              );
+            })
+          )}
+          {lines.length > 0 && Math.abs(sum - total) > 0.01 && (
+            <p className="pt-1 text-[11px] text-muted-foreground">
+              <i className="fa-solid fa-circle-info mr-1 text-primary" />
+              Direct total is {formatINR(sum)}; adjusted to {formatINR(total)} by smart netting so the whole group settles in fewer payments.
+            </p>
+          )}
+        </div>
+      );
+    };
+
     return (
       <div className="space-y-5">
         <div className="rounded-2xl border border-border bg-gradient-to-br from-card to-secondary/40 p-5">
@@ -1874,16 +1923,24 @@ export default function Home() {
             {iOwe.length === 0 ? <p className="text-sm text-muted-foreground">Nothing pending. 🎉</p> : (
               <ul className="space-y-2">
                 {iOwe.map((s) => (
-                  <li key={s.id} className="flex items-center justify-between gap-2 rounded-xl bg-background/40 px-3 py-2.5">
-                    <span className="text-sm">To <span className="font-medium">{memberName(trip, s.toId)}</span></span>
-                    <span className="flex items-center gap-2">
-                      <span className="font-semibold text-danger">{formatINR(s.amount)}</span>
-                      {s.status === "pending" ? (
-                        <Btn variant="primary" className="px-2.5 py-1 text-xs" onClick={() => markPaid(s)}><i className="fa-solid fa-paper-plane" /> Mark Paid</Btn>
-                      ) : (
-                        <Badge tone="warning">Paid · awaiting</Badge>
-                      )}
-                    </span>
+                  <li key={s.id}>
+                    <details className="group rounded-xl bg-background/40 px-3 py-2.5">
+                      <summary className="flex cursor-pointer list-none items-center justify-between gap-2 [&::-webkit-details-marker]:hidden">
+                        <span className="flex items-center gap-1.5 text-sm">
+                          To <span className="font-medium">{memberName(trip, s.toId)}</span>
+                          <i className="fa-solid fa-chevron-down text-[10px] text-muted-foreground transition-transform group-open:rotate-180" />
+                        </span>
+                        <span className="flex items-center gap-2">
+                          <span className="font-semibold text-danger">{formatINR(s.amount)}</span>
+                          {s.status === "pending" ? (
+                            <Btn variant="primary" className="px-2.5 py-1 text-xs" onClick={(e) => { e.preventDefault(); e.stopPropagation(); markPaid(s); }}><i className="fa-solid fa-paper-plane" /> Mark Paid</Btn>
+                          ) : (
+                            <Badge tone="warning">Paid · awaiting</Badge>
+                          )}
+                        </span>
+                      </summary>
+                      {settleBreakdown(s.toId, s.amount, 1)}
+                    </details>
                   </li>
                 ))}
               </ul>
@@ -1894,16 +1951,24 @@ export default function Home() {
             {owesMe.length === 0 ? <p className="text-sm text-muted-foreground">Nothing pending.</p> : (
               <ul className="space-y-2">
                 {owesMe.map((s) => (
-                  <li key={s.id} className="flex items-center justify-between gap-2 rounded-xl bg-background/40 px-3 py-2.5">
-                    <span className="text-sm">From <span className="font-medium">{memberName(trip, s.fromId)}</span></span>
-                    <span className="flex items-center gap-2">
-                      <span className="font-semibold text-primary">{formatINR(s.amount)}</span>
-                      {s.status === "paid" ? (
-                        <Btn variant="primary" className="px-2.5 py-1 text-xs" onClick={() => markReceived(s)}><i className="fa-solid fa-circle-check" /> Mark Received</Btn>
-                      ) : (
-                        <Badge tone="muted">Waiting for payment</Badge>
-                      )}
-                    </span>
+                  <li key={s.id}>
+                    <details className="group rounded-xl bg-background/40 px-3 py-2.5">
+                      <summary className="flex cursor-pointer list-none items-center justify-between gap-2 [&::-webkit-details-marker]:hidden">
+                        <span className="flex items-center gap-1.5 text-sm">
+                          From <span className="font-medium">{memberName(trip, s.fromId)}</span>
+                          <i className="fa-solid fa-chevron-down text-[10px] text-muted-foreground transition-transform group-open:rotate-180" />
+                        </span>
+                        <span className="flex items-center gap-2">
+                          <span className="font-semibold text-primary">{formatINR(s.amount)}</span>
+                          {s.status === "paid" ? (
+                            <Btn variant="primary" className="px-2.5 py-1 text-xs" onClick={(e) => { e.preventDefault(); e.stopPropagation(); markReceived(s); }}><i className="fa-solid fa-circle-check" /> Mark Received</Btn>
+                          ) : (
+                            <Badge tone="muted">Waiting for payment</Badge>
+                          )}
+                        </span>
+                      </summary>
+                      {settleBreakdown(s.fromId, s.amount, -1)}
+                    </details>
                   </li>
                 ))}
               </ul>
