@@ -582,6 +582,7 @@ export default function Home() {
   const [joinTripId, setJoinTripId] = useState("");
   const [joinTrip, setJoinTrip] = useState<Trip | null>(null);
   const [joinLoading, setJoinLoading] = useState(false);
+  const [joinError, setJoinError] = useState<"notfound" | "network" | null>(null);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState<any>(null);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
@@ -629,22 +630,31 @@ export default function Home() {
     }
   }, [toast]);
 
-  /** Load a trip for the join screen with retries, so a transient network/server
-      hiccup doesn't flash "Trip not found". No toast — the screen shows the state. */
+  /** Load a trip for the join screen. Only a real 404 means "trip not found";
+      network failures and 5xx (mobile blips, serverless cold starts) are retried
+      with backoff for ~10s before showing a "connection problem" screen. */
   const loadJoinTrip = useCallback(async (tid: string) => {
     setJoinLoading(true);
+    setJoinError(null);
     let t: Trip | null = null;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      if (attempt > 0) await new Promise((r) => setTimeout(r, 700));
+    let error: "notfound" | "network" = "network";
+    const delays = [0, 700, 1500, 3000, 5000];
+    for (const delay of delays) {
+      if (delay) await new Promise((r) => setTimeout(r, delay));
       try {
         const data = await api<{ trip: Trip }>(`/api/trips/${tid}`);
         t = data.trip;
         break;
-      } catch {
-        // retry
+      } catch (e: any) {
+        if (e?.status === 404) {
+          error = "notfound";
+          break; // the server answered: this trip really doesn't exist
+        }
+        // network error / 5xx — retry
       }
     }
     setJoinTrip(t);
+    setJoinError(t ? null : error);
     if (t) setTrip(t);
     setJoinLoading(false);
   }, []);
@@ -1061,15 +1071,20 @@ export default function Home() {
               <div className="py-10 text-center text-muted-foreground">
                 <i className="fa-solid fa-spinner fa-spin text-xl text-primary" />
                 <p className="mt-2 text-sm">Loading trip…</p>
+                <p className="mt-1 text-xs text-muted-foreground/70">First load can take a few seconds while the server wakes up.</p>
               </div>
             ) : !joinTrip ? (
               <div className="py-6 text-center">
-                <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-danger/10 text-danger">
-                  <i className="fa-solid fa-triangle-exclamation text-xl" />
+                <div className={`mx-auto grid h-14 w-14 place-items-center rounded-2xl ${joinError === "notfound" ? "bg-danger/10 text-danger" : "bg-warning/10 text-warning"}`}>
+                  <i className={`fa-solid ${joinError === "notfound" ? "fa-triangle-exclamation" : "fa-wifi"} text-xl`} />
                 </div>
-                <h2 className="mt-3 font-heading text-lg font-semibold">Trip not found</h2>
+                <h2 className="mt-3 font-heading text-lg font-semibold">{joinError === "notfound" ? "Trip not found" : "Connection problem"}</h2>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  We couldn't load trip <span className="font-mono text-foreground">{joinTripId}</span>. It may not exist, or there was a connection problem.
+                  {joinError === "notfound" ? (
+                    <>No trip exists with ID <span className="font-mono text-foreground">{joinTripId}</span>. Double-check the link with whoever shared it.</>
+                  ) : (
+                    <>We couldn't reach the server to load trip <span className="font-mono text-foreground">{joinTripId}</span>. Check your internet and try again.</>
+                  )}
                 </p>
                 <div className="mt-4 flex justify-center gap-2">
                   <Btn variant="primary" onClick={() => loadJoinTrip(joinTripId)}>

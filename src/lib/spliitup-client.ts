@@ -164,15 +164,24 @@ export function formatDate(iso: string): string {
   });
 }
 
-/** Centralized API fetch. Throws on non-ok. */
+/** Centralized API fetch. Throws on non-ok; the error carries `status` (0 = network failure). */
 export async function api<T = any>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(path, {
-    headers: { "Content-Type": "application/json" },
-    ...options,
-  });
+  let res: Response;
+  try {
+    res = await fetch(path, {
+      headers: { "Content-Type": "application/json" },
+      ...options,
+    });
+  } catch {
+    const err = new Error("Network error") as Error & { status: number };
+    err.status = 0;
+    throw err;
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new Error(data?.error || `Request failed (${res.status})`);
+    const err = new Error(data?.error || `Request failed (${res.status})`) as Error & { status: number };
+    err.status = res.status;
+    throw err;
   }
   return data as T;
 }
