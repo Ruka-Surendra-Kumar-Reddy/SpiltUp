@@ -2028,7 +2028,10 @@ export default function Home() {
                   const received = trip.handovers.filter((h) => h.fromId === m.memberId && h.toId === me.memberId).reduce((a, h) => a + h.amount, 0);
                   const myShareOfTheirs = trip.expenses.filter((e) => e.status === "approved" && e.paidBy === m.memberId).reduce((a, e) => a + (e.splits.find((sp) => sp.memberId === me.memberId)?.amount || 0), 0);
                   const theirShareOfMine = trip.expenses.filter((e) => e.status === "approved" && e.paidBy === me.memberId).reduce((a, e) => a + (e.splits.find((sp) => sp.memberId === m.memberId)?.amount || 0), 0);
-                  const avail = round2(given - received - myShareOfTheirs + theirShareOfMine);
+                  // money that already moved via settlements counts too
+                  const theyPaidMe = trip.settlements.filter((st) => st.status !== "pending" && st.fromId === m.memberId && st.toId === me.memberId).reduce((a, st) => a + st.amount, 0);
+                  const iPaidThem = trip.settlements.filter((st) => st.status !== "pending" && st.fromId === me.memberId && st.toId === m.memberId).reduce((a, st) => a + st.amount, 0);
+                  const avail = round2(given - received - myShareOfTheirs + theirShareOfMine - theyPaidMe + iPaidThem);
                   return (
                     <details key={m.memberId} className="group rounded-xl bg-background/40">
                       <summary className="flex cursor-pointer list-none items-center gap-3 px-3 py-2.5 [&::-webkit-details-marker]:hidden">
@@ -2044,6 +2047,8 @@ export default function Home() {
                         {received > 0 && <div className="flex justify-between"><span className="text-muted-foreground">{m.name} handed over to you</span><span className="font-medium text-danger">-{formatINR(received)}</span></div>}
                         {myShareOfTheirs > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Your share of {m.name}'s expenses</span><span className="font-medium text-danger">-{formatINR(myShareOfTheirs)}</span></div>}
                         {theirShareOfMine > 0 && <div className="flex justify-between"><span className="text-muted-foreground">{m.name}'s share of your expenses</span><span className="font-medium text-primary">+{formatINR(theirShareOfMine)}</span></div>}
+                        {theyPaidMe > 0 && <div className="flex justify-between"><span className="text-muted-foreground">{m.name} already settled with you</span><span className="font-medium text-danger">-{formatINR(theyPaidMe)}</span></div>}
+                        {iPaidThem > 0 && <div className="flex justify-between"><span className="text-muted-foreground">You already settled with {m.name}</span><span className="font-medium text-primary">+{formatINR(iPaidThem)}</span></div>}
                         <div className="flex justify-between border-t border-border pt-1.5 font-semibold">
                           <span>Available balance</span>
                           <span className={avail > 0.01 ? "text-primary" : avail < -0.01 ? "text-danger" : ""}>{formatINR(avail)}</span>
