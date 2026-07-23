@@ -396,23 +396,24 @@ function ExpenseForm({
             <p className="text-xs font-medium text-muted-foreground">Enter each person's share (note optional — e.g. "why 50")</p>
             {participants.length === 0 && <p className="text-xs text-muted-foreground">Select participants first.</p>}
             {participants.map((p) => (
-              <div key={p} className="flex items-center gap-2">
-                <span className="w-24 shrink-0 truncate text-sm">{memberName(trip, p)}</span>
-                <div className="min-w-0 flex-1">
-                  <Inp
-                    placeholder="Note (optional)"
-                    value={customNotes[p] || ""}
-                    onChange={(e) => setCustomNotes((prev) => ({ ...prev, [p]: e.target.value }))}
-                    className="py-2"
-                  />
-                </div>
-                <div className="w-28 shrink-0">
+              <div key={p} className="flex flex-wrap items-center gap-2">
+                <span className="order-1 w-24 shrink-0 truncate text-sm">{memberName(trip, p)}</span>
+                {/* mobile: name + amount on one line, note full-width below; desktop: name | note | amount */}
+                <div className="order-2 min-w-0 flex-1 sm:order-3 sm:w-28 sm:flex-none">
                   <Inp
                     type="number"
                     inputMode="decimal"
-                    placeholder="₹ 0"
+                    placeholder="₹ Amount"
                     value={customAmounts[p] || ""}
                     onChange={(e) => setCustomAmounts((prev) => ({ ...prev, [p]: e.target.value }))}
+                    className="py-2"
+                  />
+                </div>
+                <div className="order-3 w-full sm:order-2 sm:w-auto sm:min-w-0 sm:flex-1">
+                  <Inp
+                    placeholder="Note (optional) — e.g. why this amount"
+                    value={customNotes[p] || ""}
+                    onChange={(e) => setCustomNotes((prev) => ({ ...prev, [p]: e.target.value }))}
                     className="py-2"
                   />
                 </div>
