@@ -1856,7 +1856,7 @@ export default function Home() {
 
     // Per-expense lines between two members, from a's perspective.
     // amt > 0 = adds to what a owes b; amt < 0 = adds to what b owes a.
-    const pairBetween = (aId: string, bId: string) => {
+    const pairBetween = (aId: string, bId: string, excludeSettlementId?: string) => {
       const lines: { label: string; amt: number }[] = [];
       const you = aId === me.memberId;
       for (const e of trip.expenses) {
@@ -1871,7 +1871,7 @@ export default function Home() {
         if (h.fromId === bId && h.toId === aId) lines.push({ label: `Handover ${you ? "you" : memberName(trip, aId)} received${h.note ? ` (${h.note})` : ""}`, amt: h.amount });
       }
       for (const st of trip.settlements) {
-        if (st.status === "pending") continue; // only money that actually moved
+        if (st.status === "pending" || st.id === excludeSettlementId) continue; // only money that actually moved, minus the row being explained
         if (st.fromId === aId && st.toId === bId) lines.push({ label: you ? "Already paid by you" : `Already paid by ${memberName(trip, aId)}`, amt: -st.amount });
         if (st.fromId === bId && st.toId === aId) lines.push({ label: `Already paid by ${memberName(trip, bId)}`, amt: st.amount });
       }
@@ -1880,20 +1880,37 @@ export default function Home() {
     const pairNet = (aId: string, bId: string) => round2(pairBetween(aId, bId).reduce((a, l) => a + l.amt, 0));
 
     // sign: +1 when the row is "I pay them", -1 when the row is "they pay me"
-    const settleBreakdown = (otherId: string, total: number, sign: 1 | -1) => {
-      const lines = pairBetween(me.memberId, otherId);
+    const settleBreakdown = (otherId: string, total: number, sign: 1 | -1, settlementId?: string) => {
+      const lines = pairBetween(me.memberId, otherId, settlementId);
       const sum = round2(lines.reduce((a, l) => a + sign * l.amt, 0));
       const adjusted = Math.abs(sum - total) > 0.01;
-      // When netting rerouted money, explain it through the PAYER's other balances:
+      // When netting rerouted money, explain it through the PAYER's balances:
       // on a pay row the payer is me; on a receive row the payer is the other person.
+      // effect > 0 makes this payment bigger, effect < 0 makes it smaller.
       const payerId = sign === 1 ? me.memberId : otherId;
       const payerName = sign === 1 ? "you" : memberName(trip, otherId);
-      const rerouted = adjusted
-        ? trip.members
-            .filter((m) => m.memberId !== me.memberId && m.memberId !== otherId)
-            .map((m) => ({ name: m.name, net: pairNet(payerId, m.memberId) }))
-            .filter((x) => Math.abs(x.net) > 0.01)
-        : [];
+      const rerouted: { label: string; effect: number }[] = [];
+      if (adjusted) {
+        for (const m of trip.members) {
+          if (m.memberId === me.memberId || m.memberId === otherId) continue;
+          const net = pairNet(payerId, m.memberId);
+          if (Math.abs(net) > 0.01) {
+            rerouted.push({
+              label: net > 0 ? `${payerName === "you" ? "You owe" : `${payerName} owes`} ${m.name} (direct)` : `${m.name} owes ${payerName} (direct)`,
+              effect: net,
+            });
+          }
+        }
+        // the payer's other PENDING rows carry part of their balances elsewhere
+        // (paid/completed rows are already counted as moved money in pairNet)
+        for (const st of trip.settlements) {
+          if (st.status !== "pending" || st.id === settlementId || st.fromId !== payerId) continue;
+          rerouted.push({
+            label: `${payerName === "you" ? "You also pay" : `${payerName} also pays`} ${memberName(trip, st.toId)} separately`,
+            effect: -st.amount,
+          });
+        }
+      }
       return (
         <div className="mt-1 space-y-1 border-t border-border pt-2 text-xs">
           {lines.length === 0 && !adjusted && (
@@ -1914,20 +1931,24 @@ export default function Home() {
             <div className="pt-1">
               <p className="text-[11px] font-medium text-muted-foreground">
                 <i className="fa-solid fa-shuffle mr-1 text-primary" />
-                Direct total between you two is {formatINR(Math.max(sum, 0))}, but {sign === 1 ? "you pay" : `${payerName} pays`} {formatINR(total)} because {sign === 1 ? "your" : `${payerName}'s`} other balances are settled through this payment:
+                Direct total between you two is {formatINR(Math.max(sum, 0))}; smart netting adjusts it:
               </p>
               <div className="mt-1 space-y-1">
-                {rerouted.map((x) => (
-                  <div key={x.name} className="flex items-center justify-between gap-2 pl-3">
-                    <span className="truncate text-muted-foreground">
-                      {x.net > 0 ? `${payerName === "you" ? "You owe" : `${payerName} owes`} ${x.name} (direct)` : `${x.name} owes ${payerName} (direct)`}
+                {rerouted.map((x, i) => (
+                  <div key={i} className="flex items-center justify-between gap-2 pl-3">
+                    <span className="truncate text-muted-foreground">{x.label}</span>
+                    <span className={`shrink-0 font-medium ${x.effect > 0 ? "" : "text-primary"}`}>
+                      {x.effect > 0 ? `+${formatINR(x.effect)}` : `−${formatINR(-x.effect)}`}
                     </span>
-                    <span className={`shrink-0 font-medium ${x.net > 0 ? "" : "text-primary"}`}>{formatINR(Math.abs(x.net))}</span>
                   </div>
                 ))}
                 {rerouted.length === 0 && (
                   <p className="pl-3 text-muted-foreground">adjusted as part of group-wide netting</p>
                 )}
+                <div className="flex items-center justify-between gap-2 border-t border-border pl-3 pt-1 font-semibold">
+                  <span>= {sign === 1 ? "you pay" : `${payerName} pays you`}</span>
+                  <span>{formatINR(total)}</span>
+                </div>
               </div>
               <p className="mt-1 text-[11px] text-muted-foreground/80">Everyone still ends up with the right amount — just in fewer transfers.</p>
             </div>
@@ -1977,7 +1998,7 @@ export default function Home() {
                           )}
                         </span>
                       </summary>
-                      {settleBreakdown(s.toId, s.amount, 1)}
+                      {settleBreakdown(s.toId, s.amount, 1, s.id)}
                     </details>
                   </li>
                 ))}
@@ -2005,7 +2026,7 @@ export default function Home() {
                           )}
                         </span>
                       </summary>
-                      {settleBreakdown(s.fromId, s.amount, -1)}
+                      {settleBreakdown(s.fromId, s.amount, -1, s.id)}
                     </details>
                   </li>
                 ))}
@@ -2032,13 +2053,20 @@ export default function Home() {
                   const theyPaidMe = trip.settlements.filter((st) => st.status !== "pending" && st.fromId === m.memberId && st.toId === me.memberId).reduce((a, st) => a + st.amount, 0);
                   const iPaidThem = trip.settlements.filter((st) => st.status !== "pending" && st.fromId === me.memberId && st.toId === m.memberId).reduce((a, st) => a + st.amount, 0);
                   const avail = round2(given - received - myShareOfTheirs + theirShareOfMine - theyPaidMe + iPaidThem);
+                  // how the outstanding amount actually arrives: directly vs routed via netting
+                  const directFromThem = trip.settlements.filter((st) => st.status !== "completed" && st.fromId === m.memberId && st.toId === me.memberId).reduce((a, st) => a + st.amount, 0);
+                  const directToThem = trip.settlements.filter((st) => st.status !== "completed" && st.fromId === me.memberId && st.toId === m.memberId).reduce((a, st) => a + st.amount, 0);
+                  const routed = round2(avail - directFromThem + directToThem);
+                  const myNet = balances.find((x) => x.memberId === me.memberId)?.net || 0;
+                  const theirNet = balances.find((x) => x.memberId === m.memberId)?.net || 0;
+                  const bothSettled = Math.abs(myNet) < 0.01 && Math.abs(theirNet) < 0.01;
                   return (
                     <details key={m.memberId} className="group rounded-xl bg-background/40">
                       <summary className="flex cursor-pointer list-none items-center gap-3 px-3 py-2.5 [&::-webkit-details-marker]:hidden">
                         <Avatar name={m.name} size={32} />
                         <span className="min-w-0 flex-1 truncate text-sm font-medium">{m.name}</span>
-                        <span className={`text-sm font-semibold ${avail > 0.01 ? "text-primary" : avail < -0.01 ? "text-danger" : "text-muted-foreground"}`}>
-                          {avail > 0.01 ? `${formatINR(avail)} available` : avail < -0.01 ? `you owe ${formatINR(-avail)}` : "settled"}
+                        <span className={`text-sm font-semibold ${bothSettled || Math.abs(avail) < 0.01 ? "text-muted-foreground" : avail > 0.01 ? "text-primary" : "text-danger"}`}>
+                          {bothSettled || Math.abs(avail) < 0.01 ? "settled" : avail > 0.01 ? `${formatINR(avail)} available` : `you owe ${formatINR(-avail)}`}
                         </span>
                         <i className="fa-solid fa-chevron-down text-xs text-muted-foreground transition-transform group-open:rotate-180" />
                       </summary>
@@ -2053,9 +2081,29 @@ export default function Home() {
                           <span>Available balance</span>
                           <span className={avail > 0.01 ? "text-primary" : avail < -0.01 ? "text-danger" : ""}>{formatINR(avail)}</span>
                         </div>
-                        <p className="pt-0.5 text-[11px] text-muted-foreground/80">
-                          {avail > 0.01 ? `${m.name} is effectively holding ${formatINR(avail)} of yours — it's counted in your net balance and settlements.` : avail < -0.01 ? `You effectively owe ${m.name} ${formatINR(-avail)} — counted in your net balance and settlements.` : "You two are square."}
-                        </p>
+                        {bothSettled ? (
+                          <p className="pt-0.5 text-[11px] text-muted-foreground/80">
+                            <i className="fa-solid fa-circle-check mr-1 text-primary" />
+                            Fully settled{Math.abs(avail) > 0.01 ? ` — ${formatINR(Math.abs(avail))} of this was collected through other members' payments (smart netting)` : ""}.
+                          </p>
+                        ) : (
+                          <>
+                            {avail > 0.01 && directFromThem > 0.01 && (
+                              <p className="pt-0.5 text-[11px] text-muted-foreground/80">
+                                {m.name} pays you {formatINR(directFromThem)} directly (see settlements)
+                                {Math.abs(routed) > 0.01 ? `; ${formatINR(Math.abs(routed))} reaches you inside other members' payments via smart netting.` : "."}
+                              </p>
+                            )}
+                            {avail > 0.01 && directFromThem <= 0.01 && Math.abs(routed) > 0.01 && (
+                              <p className="pt-0.5 text-[11px] text-muted-foreground/80">This reaches you inside other members' payments via smart netting.</p>
+                            )}
+                            {avail < -0.01 && (
+                              <p className="pt-0.5 text-[11px] text-muted-foreground/80">
+                                You effectively owe {m.name} {formatINR(-avail)} — counted in your net balance and settlements.
+                              </p>
+                            )}
+                          </>
+                        )}
                       </div>
                     </details>
                   );
