@@ -29,3 +29,20 @@ Stage Summary:
 - VLM-verified landing page visual: dark near-black background, emerald accent, SpliitUp logo, 3 buttons, footer at bottom.
 - All core business logic (equal/custom splits with paise rounding, handover chaining & deduction, auto-netting two-pointer, two-step settlement confirmation, approval modes, trip closure 403, owner permissions) implemented and working.
 
+---
+Task ID: 8
+Agent: main (orchestrator)
+Task: Add a "How it works" onboarding wizard that auto-shows when someone opens a share link, plus a manual trigger on the landing page.
+
+Work Log:
+- Created `src/components/spliitup/onboarding.tsx` with a 5-step `OnboardingWizard`: (1) Welcome, (2) Expenses & Splits (equal/custom + dinner example), (3) Handovers (cash transfer + balance-adjustment example), (4) Smart Settlements (auto-netting + two-step Mark Paid/Received), (5) Member Dashboard tabs overview.
+- Wizard features: gradient icon per step, progress dots (clickable), Back/Next nav, Skip (top-right + first-step Back), keyboard arrows (←/→) + Esc to skip, "Get Started" on last step, scrollable body, mobile bottom-sheet on small screens.
+- Remembers "seen" state in sessionStorage (`spliitup_onboarding_v1`) so it doesn't nag on reload.
+- Wired into `src/app/page.tsx`: auto-triggers when arriving via `#join-TRIPID` (init + hashchange effects) if not seen before; added `closeOnboarding` handler; rendered `<OnboardingWizard>` with a `key` to reset step on each open (avoids set-state-in-effect lint).
+- Added a "How it works — Splits, Handovers & Settlements" pill button below the main CTAs on the landing page so anyone can view the explainer anytime.
+
+Stage Summary:
+- Lint clean. Browser-verified: landing "How it works" button opens wizard; Next advances through 5 slides with correct content; Skip dismisses; Get Started completes; wizard auto-opens on first share-link visit and does NOT repeat on reload.
+- VLM-confirmed the welcome slide visual: green logo, 5 progress dots (1/5 active), Skip + Next buttons.
+
+

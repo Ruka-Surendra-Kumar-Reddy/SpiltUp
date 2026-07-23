@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo, useCallback, type ReactNode } from "react";
 import { Btn, Modal, Field, Inp, Txt, Sel, Badge, Empty, Logo } from "@/components/spliitup/ui";
+import { OnboardingWizard, ONBOARDING_KEY } from "@/components/spliitup/onboarding";
 import {
   api,
   formatINR,
@@ -566,6 +567,7 @@ export default function Home() {
   const [memberTab, setMemberTab] = useState<"myview" | "addexp" | "addhand" | "history">("myview");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [pendingJoins, setPendingJoins] = useState<PendingJoinRow[]>([]);
+  const [showOnboarding, setShowOnboarding] = useState(false);
 
   const toast = useCallback((message: string, type: ToastType = "info") => {
     const id = Date.now() + Math.random();
@@ -628,6 +630,11 @@ export default function Home() {
         setJoinLoading(false);
         setView("join");
         setLoading(false);
+        // Show the "how it works" onboarding the first time someone opens a share link
+        // in this browser session (remembered in sessionStorage so it doesn't nag).
+        try {
+          if (!sessionStorage.getItem(ONBOARDING_KEY)) setShowOnboarding(true);
+        } catch {}
         return;
       }
       let s: Session | null = null;
@@ -664,6 +671,9 @@ export default function Home() {
         setJoinTrip(t);
         setJoinLoading(false);
         setView("join");
+        try {
+          if (!sessionStorage.getItem(ONBOARDING_KEY)) setShowOnboarding(true);
+        } catch {}
       } else if (!hash && view !== "dashboard") {
         setView("landing");
       }
@@ -671,6 +681,14 @@ export default function Home() {
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, [fetchTrip, view]);
+
+  /* ---------- onboarding handlers ---------- */
+  const closeOnboarding = useCallback(() => {
+    try {
+      sessionStorage.setItem(ONBOARDING_KEY, "1");
+    } catch {}
+    setShowOnboarding(false);
+  }, []);
 
   /* ---------- handlers ---------- */
   function handleCreateSuccess(s: Session, t: Trip) {
@@ -951,6 +969,15 @@ export default function Home() {
               <i className="fa-solid fa-lock" /> Creator Login
             </Btn>
           </div>
+
+          <button
+            onClick={() => setShowOnboarding(true)}
+            className="spl-fade-in mt-5 inline-flex items-center gap-2 rounded-full border border-border bg-card/60 px-4 py-2 text-xs font-medium text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
+          >
+            <i className="fa-solid fa-circle-question text-primary" />
+            How it works — Splits, Handovers &amp; Settlements
+            <i className="fa-solid fa-arrow-right text-[10px]" />
+          </button>
 
           <div className="mt-16 grid w-full max-w-3xl grid-cols-1 gap-4 sm:grid-cols-3">
             {[
@@ -1824,6 +1851,7 @@ export default function Home() {
       {view === "join" && renderJoin()}
       {view === "dashboard" && renderDashboard()}
       {renderModal()}
+      <OnboardingWizard key={showOnboarding ? "open" : "closed"} open={showOnboarding} onComplete={closeOnboarding} onSkip={closeOnboarding} />
     </div>
   );
 }
