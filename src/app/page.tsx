@@ -397,21 +397,25 @@ function ExpenseForm({
             {participants.length === 0 && <p className="text-xs text-muted-foreground">Select participants first.</p>}
             {participants.map((p) => (
               <div key={p} className="flex items-center gap-2">
-                <span className="w-28 shrink-0 truncate text-sm">{memberName(trip, p)}</span>
-                <Inp
-                  type="number"
-                  inputMode="decimal"
-                  placeholder="0"
-                  value={customAmounts[p] || ""}
-                  onChange={(e) => setCustomAmounts((prev) => ({ ...prev, [p]: e.target.value }))}
-                  className="py-2 w-28 shrink-0"
-                />
-                <Inp
-                  placeholder="Note (optional)"
-                  value={customNotes[p] || ""}
-                  onChange={(e) => setCustomNotes((prev) => ({ ...prev, [p]: e.target.value }))}
-                  className="py-2"
-                />
+                <span className="w-24 shrink-0 truncate text-sm">{memberName(trip, p)}</span>
+                <div className="min-w-0 flex-1">
+                  <Inp
+                    placeholder="Note (optional)"
+                    value={customNotes[p] || ""}
+                    onChange={(e) => setCustomNotes((prev) => ({ ...prev, [p]: e.target.value }))}
+                    className="py-2"
+                  />
+                </div>
+                <div className="w-28 shrink-0">
+                  <Inp
+                    type="number"
+                    inputMode="decimal"
+                    placeholder="₹ 0"
+                    value={customAmounts[p] || ""}
+                    onChange={(e) => setCustomAmounts((prev) => ({ ...prev, [p]: e.target.value }))}
+                    className="py-2"
+                  />
+                </div>
               </div>
             ))}
             <div className="flex items-center justify-between border-t border-border pt-2 text-sm">
