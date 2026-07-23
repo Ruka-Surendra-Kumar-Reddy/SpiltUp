@@ -2111,18 +2111,20 @@ export default function Home() {
                       <span className="text-muted-foreground">Total balance between you two</span>
                       <span className="font-medium">{formatINR(p.avail)}</span>
                     </div>
-                    {p.avail > 0.01 && p.collected > 0.01 && (
-                      <div className="flex justify-between gap-2">
-                        <span className="min-w-0 truncate text-muted-foreground">Already collected via {p.collectedVia.map((x) => x.name).join(", ")}'s completed payment{p.collectedVia.length > 1 ? "s" : ""}</span>
-                        <span className="shrink-0 font-medium text-primary">-{formatINR(p.collected)}</span>
-                      </div>
-                    )}
-                    {p.avail < -0.01 && p.discharged > 0.01 && (
-                      <div className="flex justify-between gap-2">
-                        <span className="min-w-0 truncate text-muted-foreground">Already covered via {p.dischargedVia.map((x) => x.name).join(", ")}'s completed payment{p.dischargedVia.length > 1 ? "s" : ""}</span>
-                        <span className="shrink-0 font-medium text-primary">+{formatINR(p.discharged)}</span>
-                      </div>
-                    )}
+                    {p.avail > 0.01 &&
+                      p.collectedVia.map((x) => (
+                        <div key={x.name} className="flex justify-between gap-2">
+                          <span className="min-w-0 truncate text-muted-foreground">{x.name}'s share of {p.m.name}'s spending — already reached you in {x.name}'s payment</span>
+                          <span className="shrink-0 font-medium text-primary">-{formatINR(x.amt)}</span>
+                        </div>
+                      ))}
+                    {p.avail < -0.01 &&
+                      p.dischargedVia.map((x) => (
+                        <div key={x.name} className="flex justify-between gap-2">
+                          <span className="min-w-0 truncate text-muted-foreground">{x.name}'s share of your spending — already delivered in {x.name}'s payment</span>
+                          <span className="shrink-0 font-medium text-primary">+{formatINR(x.amt)}</span>
+                        </div>
+                      ))}
                     <div className="flex justify-between border-t border-border pt-1.5 font-semibold">
                       <span>{p.outstanding >= -0.01 ? "Still to collect" : "You still owe"}</span>
                       <span className={p.outstanding > 0.01 ? "text-primary" : p.outstanding < -0.01 ? "text-danger" : ""}>{formatINR(Math.abs(p.outstanding))}</span>
