@@ -1998,9 +1998,16 @@ export default function Home() {
           .map((o) => ({ name: o.name, amt: round2(-pairNet(me.memberId, o.memberId)) }))
           .filter((x) => x.amt > 0.01);
         const discharged = round2(dischargedVia.reduce((a, x) => a + x.amt, 0));
-        const bothSettled = Math.abs(balances.find((x) => x.memberId === me.memberId)?.net || 0) < 0.01 && isSettled(m.memberId);
-        const outstanding = bothSettled ? 0 : avail > 0.01 ? round2(Math.max(0, avail - collected)) : avail < -0.01 ? round2(Math.min(0, avail + discharged)) : 0;
-        return { m, given, received, myShareOfTheirs, theirShareOfMine, myShareNames, theirShareNames, theyPaidMe, iPaidThem, avail, directFromThem, collectedVia, collected, stillViaOthers, dischargedVia, discharged, bothSettled, outstanding };
+        // once either of us is fully settled, nothing more will ever flow between
+        // us — any pairwise residue was money netting routed to/from other ledgers
+        const partnerResolved = isSettled(me.memberId) || isSettled(m.memberId);
+        const outstanding = partnerResolved ? 0 : avail > 0.01 ? round2(Math.max(0, avail - collected)) : avail < -0.01 ? round2(Math.min(0, avail + discharged)) : 0;
+        // where a settled partner's pairwise overpayment came from (their shares of others' spending)
+        const overRoutes = trip.members
+          .filter((o) => o.memberId !== me.memberId && o.memberId !== m.memberId)
+          .map((o) => ({ name: o.name, amt: round2(Math.max(0, pairNet(m.memberId, o.memberId))) }))
+          .filter((x) => x.amt > 0.01);
+        return { m, given, received, myShareOfTheirs, theirShareOfMine, myShareNames, theirShareNames, theyPaidMe, iPaidThem, avail, directFromThem, collectedVia, collected, stillViaOthers, dischargedVia, discharged, partnerResolved, outstanding, overRoutes };
       });
     const stillToCollect = round2(handoverPartners.reduce((a, p) => a + Math.max(0, p.outstanding), 0));
     const stillToGive = round2(handoverPartners.reduce((a, p) => a + Math.max(0, -p.outstanding), 0));
@@ -2095,8 +2102,8 @@ export default function Home() {
                   <summary className="flex cursor-pointer list-none items-center gap-3 px-3 py-2.5 [&::-webkit-details-marker]:hidden">
                     <Avatar name={p.m.name} size={32} />
                     <span className="min-w-0 flex-1 truncate text-sm font-medium">{p.m.name}</span>
-                    <span className={`text-sm font-semibold ${p.bothSettled || Math.abs(p.outstanding) < 0.01 ? "text-muted-foreground" : p.outstanding > 0.01 ? "text-primary" : "text-danger"}`}>
-                      {p.bothSettled || Math.abs(p.outstanding) < 0.01 ? "settled" : p.outstanding > 0.01 ? `${formatINR(p.outstanding)} to collect` : `you owe ${formatINR(-p.outstanding)}`}
+                    <span className={`text-sm font-semibold ${Math.abs(p.outstanding) < 0.01 ? "text-muted-foreground" : p.outstanding > 0.01 ? "text-primary" : "text-danger"}`}>
+                      {Math.abs(p.outstanding) < 0.01 ? "settled" : p.outstanding > 0.01 ? `${formatINR(p.outstanding)} to collect` : `you owe ${formatINR(-p.outstanding)}`}
                     </span>
                     <i className="fa-solid fa-chevron-down text-xs text-muted-foreground transition-transform group-open:rotate-180" />
                   </summary>
@@ -2111,14 +2118,14 @@ export default function Home() {
                       <span className="text-muted-foreground">Total balance between you two</span>
                       <span className="font-medium">{formatINR(p.avail)}</span>
                     </div>
-                    {p.avail > 0.01 &&
+                    {!p.partnerResolved && p.avail > 0.01 &&
                       p.collectedVia.map((x) => (
                         <div key={x.name} className="flex justify-between gap-2">
                           <span className="min-w-0 truncate text-muted-foreground">{x.name}'s share of {p.m.name}'s spending — already reached you in {x.name}'s payment</span>
                           <span className="shrink-0 font-medium text-primary">-{formatINR(x.amt)}</span>
                         </div>
                       ))}
-                    {p.avail < -0.01 &&
+                    {!p.partnerResolved && p.avail < -0.01 &&
                       p.dischargedVia.map((x) => (
                         <div key={x.name} className="flex justify-between gap-2">
                           <span className="min-w-0 truncate text-muted-foreground">{x.name}'s share of your spending — already delivered in {x.name}'s payment</span>
@@ -2129,10 +2136,17 @@ export default function Home() {
                       <span>{p.outstanding >= -0.01 ? "Still to collect" : "You still owe"}</span>
                       <span className={p.outstanding > 0.01 ? "text-primary" : p.outstanding < -0.01 ? "text-danger" : ""}>{formatINR(Math.abs(p.outstanding))}</span>
                     </div>
-                    {p.bothSettled ? (
+                    {p.partnerResolved ? (
                       <p className="pt-0.5 text-[11px] text-muted-foreground/80">
                         <i className="fa-solid fa-circle-check mr-1 text-primary" />
-                        Fully settled — every rupee accounted for.
+                        Settled between you two — nothing more moves here.
+                        {p.avail < -0.01 && p.overRoutes.length > 0 && (
+                          <>
+                            {" "}The extra {formatINR(-p.avail)} in {p.m.name}'s payment was {p.m.name}'s share of{" "}
+                            {p.overRoutes.map((x) => `${x.name}'s spending (${formatINR(x.amt)})`).join(" and ")} — smart netting routed it to you, and it already reduces what they owe you (see their card).
+                          </>
+                        )}
+                        {p.avail > 0.01 && <> The remaining {formatINR(p.avail)} reaches you inside other members' payments.</>}
                       </p>
                     ) : (
                       <>
