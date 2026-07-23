@@ -1871,28 +1871,53 @@ export default function Home() {
     const settleBreakdown = (otherId: string, total: number, sign: 1 | -1) => {
       const lines = pairLines(otherId);
       const sum = round2(lines.reduce((a, l) => a + sign * l.amt, 0));
+      const adjusted = Math.abs(sum - total) > 0.01;
+      // When netting rerouted money, name the balances that got folded in: my direct
+      // balances with members who have no settlement row with me of their own.
+      const rerouted = adjusted
+        ? trip.members
+            .filter((m) => m.memberId !== me.memberId && m.memberId !== otherId)
+            .filter((m) => !trip.settlements.some((st) => st.status !== "completed" && ((st.fromId === me.memberId && st.toId === m.memberId) || (st.fromId === m.memberId && st.toId === me.memberId))))
+            .map((m) => ({ name: m.name, net: round2(pairLines(m.memberId).reduce((a, l) => a + l.amt, 0)) }))
+            .filter((x) => Math.abs(x.net) > 0.01)
+        : [];
       return (
         <div className="mt-1 space-y-1 border-t border-border pt-2 text-xs">
-          {lines.length === 0 ? (
+          {lines.length === 0 && !adjusted && (
             <p className="text-muted-foreground">No direct expenses between you two — this comes from smart netting across the group.</p>
-          ) : (
-            lines.map((l, i) => {
-              const v = sign * l.amt;
-              return (
-                <div key={i} className="flex items-center justify-between gap-2">
-                  <span className="truncate text-muted-foreground">{l.label}</span>
-                  <span className={`shrink-0 font-medium ${v >= 0 ? "" : "text-primary"}`}>
-                    {v >= 0 ? formatINR(v) : `−${formatINR(-v)}`}
-                  </span>
-                </div>
-              );
-            })
           )}
-          {lines.length > 0 && Math.abs(sum - total) > 0.01 && (
-            <p className="pt-1 text-[11px] text-muted-foreground">
-              <i className="fa-solid fa-circle-info mr-1 text-primary" />
-              Direct total is {formatINR(sum)}; adjusted to {formatINR(total)} by smart netting so the whole group settles in fewer payments.
-            </p>
+          {lines.map((l, i) => {
+            const v = sign * l.amt;
+            return (
+              <div key={i} className="flex items-center justify-between gap-2">
+                <span className="truncate text-muted-foreground">{l.label}</span>
+                <span className={`shrink-0 font-medium ${v >= 0 ? "" : "text-primary"}`}>
+                  {v >= 0 ? formatINR(v) : `−${formatINR(-v)}`}
+                </span>
+              </div>
+            );
+          })}
+          {adjusted && (
+            <div className="pt-1">
+              <p className="text-[11px] font-medium text-muted-foreground">
+                <i className="fa-solid fa-shuffle mr-1 text-primary" />
+                Smart netting: direct total between you two is {formatINR(Math.max(sum, 0))}; this payment is {formatINR(total)} because these balances were folded in:
+              </p>
+              <div className="mt-1 space-y-1">
+                {rerouted.map((x) => (
+                  <div key={x.name} className="flex items-center justify-between gap-2 pl-3">
+                    <span className="truncate text-muted-foreground">
+                      {x.net > 0 ? `You owe ${x.name} (direct)` : `${x.name} owes you (direct)`}
+                    </span>
+                    <span className={`shrink-0 font-medium ${x.net > 0 ? "" : "text-primary"}`}>{formatINR(Math.abs(x.net))}</span>
+                  </div>
+                ))}
+                {rerouted.length === 0 && (
+                  <p className="pl-3 text-muted-foreground">balances routed between other members of the group</p>
+                )}
+              </div>
+              <p className="mt-1 text-[11px] text-muted-foreground/80">Everyone still ends up with the right amount — just in fewer transfers.</p>
+            </div>
           )}
         </div>
       );
